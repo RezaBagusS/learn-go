@@ -36,7 +36,6 @@ func Day3() {
 		log.Fatalln("Error saat inisialisasi aplikasi:", err)
 	}
 
-	// PENTING: defer db.Close() tetap diletakkan di main.go!
 	// Ini memastikan koneksi database baru akan ditutup HANYA KETIKA aplikasi server mati.
 	defer db.Close()
 

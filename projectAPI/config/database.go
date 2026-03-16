@@ -9,10 +9,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// Gunakan huruf kapital 'C' agar fungsi ini Exported (bisa dipanggil dari main.go)
 func ConnectDB() (*sqlx.DB, error) {
 	// DSN (Data Source Name)
-	dsn := "host=localhost port=5432 user=postgres password=rahasia dbname=belajar_go sslmode=disable"
+	dsn := "host=localhost port=5432 user=postgres password=Persebaya27. dbname=dbIntegration sslmode=disable"
 
 	// Buka koneksi ke database
 	db, err := sqlx.Connect("postgres", dsn)
