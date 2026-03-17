@@ -19,18 +19,22 @@ package day
 // )
 
 import (
-	"fmt"
 	"log"
-	"net/http"
 
 	"belajar-go/projectAPI/config" // Import package config yang baru kita buat
-	"belajar-go/projectAPI/handler"
-	"belajar-go/projectAPI/repository"
-	"belajar-go/projectAPI/service"
+	"belajar-go/projectAPI/server"
+
+	"github.com/joho/godotenv"
 )
 
 func Day3() {
-	// 1. Inisialisasi Koneksi Database
+
+	// Muat access environment
+	if err := godotenv.Load("projectAPI/.env"); err != nil {
+		log.Fatalf("App Error loading .env file: %v", err)
+	}
+
+	// Inisialisasi Koneksi Database
 	db, err := config.ConnectDB()
 	if err != nil {
 		log.Fatalln("Error saat inisialisasi aplikasi:", err)
@@ -39,25 +43,7 @@ func Day3() {
 	// Ini memastikan koneksi database baru akan ditutup HANYA KETIKA aplikasi server mati.
 	defer db.Close()
 
-	// 2. DEPENDENCY INJECTION (Perakitan)
-	taskRepo := repository.NewTaskRepository(db)
-	taskService := service.NewTaskService(taskRepo)
-	taskHandler := handler.NewTaskHandler(taskService)
-
-	// 3. Routing HTTP
-	mux := http.NewServeMux()
-	mux.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			taskHandler.GetAll(w, r)
-		case http.MethodPost:
-			taskHandler.Create(w, r)
-		default:
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		}
-	})
-
-	// 4. Jalankan Server
-	fmt.Println("Server berjalan di http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	// 3. Jalankan server
+	svr := server.NewServer(db)
+	svr.Run()
 }

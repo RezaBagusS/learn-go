@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/jmoiron/sqlx"
 
@@ -11,7 +12,13 @@ import (
 
 func ConnectDB() (*sqlx.DB, error) {
 	// DSN (Data Source Name)
-	dsn := "host=localhost port=5432 user=postgres password=Persebaya27. dbname=dbIntegration sslmode=disable"
+	host := os.Getenv("DB_HOST")
+	port := os.Getenv("DB_PORT")
+	user := os.Getenv("DB_USER")
+	pass := os.Getenv("DB_PASSWORD")
+	name := os.Getenv("DB_NAME")
+	ssl := os.Getenv("DB_SSLMODE")
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", host, port, user, pass, name, ssl)
 
 	// Buka koneksi ke database
 	db, err := sqlx.Connect("postgres", dsn)
