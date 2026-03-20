@@ -3,7 +3,8 @@ package main
 // Format import: "nama-modul-di-go.mod/nama-folder"
 
 import (
-	"belajar-go/day"
+	// "belajar-go/day"
+	"belajar-go/challenge"
 	// "belajar-go/baseCodeAPI"
 )
 
@@ -12,6 +13,7 @@ func main() {
 	// day.Day2()
 	// learngo.Q1()
 	// Q2()
-	day.Day3()
+	// day.Day3()
 	// baseCodeAPI.BaseAPI()
+	challenge.Challenge2()
 }
