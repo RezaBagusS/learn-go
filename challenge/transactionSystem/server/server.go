@@ -1,7 +1,8 @@
 package server
 
 import (
-	"belajar-go/challenge/transactionSystem/internal/api/accounts/handler"
+	accountHandler "belajar-go/challenge/transactionSystem/internal/api/accounts/handler"
+	bankHandler "belajar-go/challenge/transactionSystem/internal/api/banks/handler"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"fmt"
 	"log"
@@ -29,8 +30,12 @@ func NewServer(db *sqlx.DB) *Server {
 func (s *Server) registerRoutes() {
 
 	// Account Domain =====
-	accountHandler := handler.NewAccountsHandler(s.mux, s.db)
-	accountHandler.MapRoutes()
+	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db)
+	accHandler.MapRoutes()
+
+	// Bank Domain =====
+	bnkHandler := bankHandler.NewBanksHandler(s.mux, s.db)
+	bnkHandler.MapRoutes()
 }
 
 func (s *Server) Run() {

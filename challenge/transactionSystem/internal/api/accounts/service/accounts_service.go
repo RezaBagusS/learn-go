@@ -3,11 +3,15 @@ package service
 import (
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"fmt"
+
+	"github.com/google/uuid"
 	// "errors"
 )
 
 type AccountsService interface {
 	FetchAllAccounts() ([]models.Account, error)
+	FetchAccountById(id string) (models.Account, error)
 	// CreateNewTask(task models.Task) (models.Task, error)
 	// PatchTaskById(task models.Task) (int, error)
 	// DeleteTaskById(id int) error
@@ -24,6 +28,18 @@ func NewAccountsService(repo repository.AccountRepository) AccountsService {
 // Fetch All Data
 func (s *accountsService) FetchAllAccounts() ([]models.Account, error) {
 	return s.repo.GetAllAccounts()
+}
+
+// Fetch Account by Id
+func (s *accountsService) FetchAccountById(id string) (models.Account, error) {
+
+	_, err := uuid.Parse(id)
+	if err != nil {
+		// Jika gagal di-parse, kembalikan error validasi
+		return models.Account{}, fmt.Errorf("format ID tidak valid: harus berupa UUID")
+	}
+
+	return s.repo.GetAccountById(id)
 }
 
 // // Create new task

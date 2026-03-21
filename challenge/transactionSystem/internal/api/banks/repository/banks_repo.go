@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"fmt"
 
@@ -10,82 +9,81 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-type AccountRepository interface {
-	GetAllAccounts() ([]models.Account, error)
-	GetAccountById(id string) (models.Account, error)
-	// CreateAccount(account models.Account) (int, error)
+type BankRepository interface {
+	GetAllBanks() ([]models.Bank, error)
+	// GetAccountById(id string) (models.Account, error)
+	CreateBank(bank models.Bank) (string, error)
 	// UpdateAccount(account models.Account) (int, error)
 	// DeleteAccount(id int) error
 }
 
-type accountRepository struct {
+type bankRepository struct {
 	db *sqlx.DB
 }
 
-func NewAccountRepository(db *sqlx.DB) AccountRepository {
-	return &accountRepository{db: db}
+func NewBankRepository(db *sqlx.DB) BankRepository {
+	return &bankRepository{db: db}
 }
 
 // Get All
-func (r *accountRepository) GetAllAccounts() ([]models.Account, error) {
-	var accounts []models.Account
-	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts"
+func (r *bankRepository) GetAllBanks() ([]models.Bank, error) {
+	var banks []models.Bank
+	query := "SELECT bank_code, bank_name, created_at FROM banks"
 
-	err := r.db.Select(&accounts, query)
+	err := r.db.Select(&banks, query)
 	if err != nil {
 		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
 	}
 
-	if accounts == nil {
-		accounts = []models.Account{}
+	if banks == nil {
+		banks = []models.Bank{}
 	}
 
-	return accounts, nil
+	return banks, nil
 }
 
 // Get Account By ID
-func (r *accountRepository) GetAccountById(id string) (models.Account, error) {
-	var accounts []models.Account
+// func (r *accountRepository) GetAccountById(id string) (models.Account, error) {
+// 	var accounts []models.Account
 
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data account by id = %s", id))
-	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
-	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts WHERE id = $1"
+// 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data account by id = %s", id))
+// 	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
+// 	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts WHERE id = $1"
 
-	err := r.db.Select(&accounts, query, id)
-	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, "gagal mengambil data dari db")
-		return models.Account{}, fmt.Errorf("gagal mengambil data dari db: %w", err)
-	}
-
-	if len(accounts) == 0 {
-		helper.PrintLog("account", helper.LogPositionRepo, "ID Account tidak ditemukan")
-		return models.Account{}, fmt.Errorf("akun dengan ID %s tidak ditemukan", id)
-	}
-
-	if len(accounts) > 1 {
-		helper.PrintLog("account", helper.LogPositionRepo, "Terdapat lebih dari 1 akun")
-		return models.Account{}, fmt.Errorf("terdapat lebih dari 1 akun dengan ID %s", id)
-	}
-
-	account := accounts[0]
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan akun dengan id = %s -> %+v", id, account))
-
-	return account, nil
-}
-
-// Post Create New Account
-// func (r *accountRepository) CreateAccount(account models.Account) (int, error) {
-// 	var newID int
-// 	query := `INSERT INTO accounts (title, description) VALUES ($1, $2) RETURNING id`
-
-// 	// Gunakan QueryRowx untuk mengeksekusi insert dan menangkap RETURNING id
-// 	err := r.db.QueryRowx(query, task.Title, task.Description).Scan(&newID)
+// 	err := r.db.Select(&accounts, query, id)
 // 	if err != nil {
-// 		return 0, fmt.Errorf("gagal insert task ke db: %w", err)
+// 		helper.PrintLog("account", helper.LogPositionRepo, "gagal mengambil data dari db")
+// 		return models.Account{}, fmt.Errorf("gagal mengambil data dari db: %w", err)
 // 	}
 
-// 	return newID, nil
+// 	if len(accounts) == 0 {
+// 		helper.PrintLog("account", helper.LogPositionRepo, "ID Account tidak ditemukan")
+// 		return models.Account{}, fmt.Errorf("akun dengan ID %s tidak ditemukan", id)
+// 	}
+
+// 	if len(accounts) > 1 {
+// 		helper.PrintLog("account", helper.LogPositionRepo, "Terdapat lebih dari 1 akun")
+// 		return models.Account{}, fmt.Errorf("terdapat lebih dari 1 akun dengan ID %s", id)
+// 	}
+
+// 	account := accounts[0]
+// 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan akun dengan id = %s -> %+v", id, account))
+
+// 	return account, nil
 // }
+
+// Post Create New Bank
+func (r *bankRepository) CreateBank(bank models.Bank) (string, error) {
+	var newBank string
+	query := `INSERT INTO banks (bank_code, bank_name) VALUES ($1, $2) RETURNING bank_code`
+
+	err := r.db.QueryRowx(query, bank.BankCode, bank.BankName).Scan(&newBank)
+	if err != nil {
+		return "", fmt.Errorf("gagal insert data bank ke db: %w", err)
+	}
+
+	return newBank, nil
+}
 
 // // Method Update
 // func (r *accountRepository) UpdateTask(task models.Account) (int, error) {

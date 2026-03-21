@@ -5,6 +5,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/service"
 	"belajar-go/challenge/transactionSystem/internal/helper"
+	"fmt"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
@@ -30,6 +31,10 @@ func (a *AccountsHandler) MapRoutes() {
 		helper.NewAPIPath(http.MethodGet, "/accounts"),
 		a.GetAll(),
 	)
+	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodGet, "/account/{id}"),
+		a.GetById(),
+	)
 }
 
 // GET /accounts
@@ -48,6 +53,27 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		helper.PrintLog("account", helper.LogPositionHandler, "Berhasil mengambil list data akun")
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data akun", map[string]any{
 			"accounts": accounts,
+		})
+	}
+}
+
+// GET /account/{id}
+func (h *AccountsHandler) GetById() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		idStr := r.PathValue("id")
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+
+		account, err := h.svc.FetchAccountById(idStr)
+		if err != nil {
+			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr))
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr), map[string]any{
+			"account": account,
 		})
 	}
 }
