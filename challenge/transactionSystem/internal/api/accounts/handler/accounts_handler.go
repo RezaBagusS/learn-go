@@ -5,6 +5,8 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/service"
 	"belajar-go/challenge/transactionSystem/internal/helper"
+	"belajar-go/challenge/transactionSystem/internal/models"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -34,6 +36,10 @@ func (a *AccountsHandler) MapRoutes() {
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/account/{id}"),
 		a.GetById(),
+	)
+	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodPost, "/account"),
+		a.Create(),
 	)
 }
 
@@ -74,6 +80,30 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr))
 		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr), map[string]any{
 			"account": account,
+		})
+	}
+}
+
+// POST /account
+func (h *AccountsHandler) Create() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		var payload models.Account
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			dto.WriteError(w, http.StatusBadRequest, "Format JSON tidak valid!")
+			return
+		}
+
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
+
+		newBank, err := h.svc.CreateNewAccount(payload)
+		if err != nil {
+			dto.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data account baru", map[string]any{
+			"account": newBank,
 		})
 	}
 }

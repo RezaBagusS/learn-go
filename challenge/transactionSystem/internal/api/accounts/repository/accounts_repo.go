@@ -8,12 +8,13 @@ import (
 	// "strings"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 type AccountRepository interface {
 	GetAllAccounts() ([]models.Account, error)
 	GetAccountById(id string) (models.Account, error)
-	// CreateAccount(account models.Account) (int, error)
+	CreateAccount(account models.Account) (string, error)
 	// UpdateAccount(account models.Account) (int, error)
 	// DeleteAccount(id int) error
 }
@@ -74,18 +75,25 @@ func (r *accountRepository) GetAccountById(id string) (models.Account, error) {
 }
 
 // Post Create New Account
-// func (r *accountRepository) CreateAccount(account models.Account) (int, error) {
-// 	var newID int
-// 	query := `INSERT INTO accounts (title, description) VALUES ($1, $2) RETURNING id`
+func (r *accountRepository) CreateAccount(account models.Account) (string, error) {
+	var newAccount string
+	query := `INSERT INTO accounts (bank_code, account_number, account_holder, balance) VALUES ($1, $2, $3, $4) RETURNING id`
 
-// 	// Gunakan QueryRowx untuk mengeksekusi insert dan menangkap RETURNING id
-// 	err := r.db.QueryRowx(query, task.Title, task.Description).Scan(&newID)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("gagal insert task ke db: %w", err)
-// 	}
+	// Gunakan QueryRowx untuk mengeksekusi insert dan menangkap RETURNING id
+	err := r.db.QueryRowx(query, account.BankCode, account.AccountNumber, account.AccountHolder, account.Balance).Scan(&newAccount)
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok {
+			// [23505] Unique Violation
+			if pqErr.Code == "23505" {
+				return "", fmt.Errorf("nomor rekening %s sudah terdaftar untuk bank %s", account.AccountNumber, account.BankCode)
+			}
+		}
 
-// 	return newID, nil
-// }
+		return "", fmt.Errorf("gagal insert account ke db: %w", err)
+	}
+
+	return newAccount, nil
+}
 
 // // Method Update
 // func (r *accountRepository) UpdateTask(task models.Account) (int, error) {

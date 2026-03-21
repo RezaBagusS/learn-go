@@ -2,7 +2,9 @@ package service
 
 import (
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
+	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -12,7 +14,7 @@ import (
 type AccountsService interface {
 	FetchAllAccounts() ([]models.Account, error)
 	FetchAccountById(id string) (models.Account, error)
-	// CreateNewTask(task models.Task) (models.Task, error)
+	CreateNewAccount(task models.Account) (models.Account, error)
 	// PatchTaskById(task models.Task) (int, error)
 	// DeleteTaskById(id int) error
 }
@@ -36,30 +38,34 @@ func (s *accountsService) FetchAccountById(id string) (models.Account, error) {
 	_, err := uuid.Parse(id)
 	if err != nil {
 		// Jika gagal di-parse, kembalikan error validasi
-		return models.Account{}, fmt.Errorf("format ID tidak valid: harus berupa UUID")
+		return models.Account{}, fmt.Errorf("format ID tidak valid atau Data tidak ditemukan")
 	}
 
 	return s.repo.GetAccountById(id)
 }
 
-// // Create new task
-// func (s *taskService) CreateNewTask(task models.Task) (models.Task, error) {
-// 	// Logika Bisnis: Validasi input tidak boleh kosong
-// 	if task.Title == "" {
-// 		return models.Task{}, errors.New("title task tidak boleh kosong")
-// 	}
+// Create new task
+func (s *accountsService) CreateNewAccount(account models.Account) (models.Account, error) {
 
-// 	// Simpan ke repository
-// 	insertedID, err := s.repo.CreateTask(task)
-// 	if err != nil {
-// 		return models.Task{}, err
-// 	}
+	if account.BankCode == "" || account.AccountNumber == "" || account.AccountHolder == "" {
+		return models.Account{}, errors.New("Terdapat field yang kosong!")
+	}
 
-// 	// Lengkapi data task dengan ID yang baru digenerate oleh database
-// 	task.ID = insertedID
-// 	task.IsCompleted = false // Default
-// 	return task, nil
-// }
+	if account.Balance < 0 {
+		return models.Account{}, errors.New("Balance tidak boleh minus!")
+	}
+
+	// Simpan ke repository
+	newAccount, err := s.repo.CreateAccount(account)
+	if err != nil {
+		return models.Account{}, err
+	}
+
+	helper.PrintLog("account", helper.LogPositionService, fmt.Sprintf("Berhasil menambahkan data account : %s", newAccount))
+
+	account.ID = uuid.MustParse(newAccount)
+	return account, nil
+}
 
 // // Update task
 // func (s *taskService) PatchTaskById(task models.Task) (int, error) {

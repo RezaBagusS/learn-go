@@ -44,8 +44,8 @@ func (s *bankService) FetchAllBanks() ([]models.Bank, error) {
 // Create new bank
 func (s *bankService) CreateNewBank(bank models.Bank) (models.Bank, error) {
 	// Logika Bisnis: Validasi input tidak boleh kosong
-	if bank.BankCode == "" {
-		return models.Bank{}, fmt.Errorf("kode bank tidak boleh kosong")
+	if bank.BankCode == "" || bank.BankName == "" {
+		return models.Bank{}, fmt.Errorf("Field tidak boleh kosong!")
 	}
 
 	// Simpan ke repository

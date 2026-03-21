@@ -18,6 +18,11 @@ CREATE TABLE accounts (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE accounts
+ADD CONSTRAINT unique_bank_account UNIQUE (bank_code, account_number);
+
+ALTER TABLE accounts ALTER COLUMN id SET DEFAULT gen_random_uuid();
 */
 
 type Account struct {

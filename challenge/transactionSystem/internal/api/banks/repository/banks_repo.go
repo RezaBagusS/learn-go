@@ -7,6 +7,7 @@ import (
 	// "strings"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 type BankRepository interface {
@@ -79,6 +80,14 @@ func (r *bankRepository) CreateBank(bank models.Bank) (string, error) {
 
 	err := r.db.QueryRowx(query, bank.BankCode, bank.BankName).Scan(&newBank)
 	if err != nil {
+
+		if pqErr, ok := err.(*pq.Error); ok {
+			// [23505] Unique Violation
+			if pqErr.Code == "23505" {
+				return "", fmt.Errorf("Kode Bank %s sudah terdaftar pada sistem", bank.BankCode)
+			}
+		}
+
 		return "", fmt.Errorf("gagal insert data bank ke db: %w", err)
 	}
 
