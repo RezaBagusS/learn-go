@@ -32,6 +32,6 @@ type Transaction struct {
 	ToAccountID   string    `db:"to_account_id" json:"to_account_id"`
 	ToBankCode    string    `db:"to_bank_code" json:"to_bank_code"`
 	Amount        int64     `db:"amount" json:"amount"`
-	Note          int64     `db:"note" json:"note"`
+	Note          string    `db:"note" json:"note"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
