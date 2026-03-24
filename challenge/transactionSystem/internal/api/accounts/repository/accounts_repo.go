@@ -4,6 +4,8 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"fmt"
+	"strings"
+	"time"
 
 	// "strings"
 
@@ -15,8 +17,8 @@ type AccountRepository interface {
 	GetAllAccounts() ([]models.Account, error)
 	GetAccountById(id string) (models.Account, error)
 	CreateAccount(account models.Account) (string, error)
-	// UpdateAccount(account models.Account) (int, error)
-	// DeleteAccount(id int) error
+	UpdateAccount(account models.Account) (string, error)
+	DeleteAccount(id string) error
 }
 
 type accountRepository struct {
@@ -95,82 +97,83 @@ func (r *accountRepository) CreateAccount(account models.Account) (string, error
 	return newAccount, nil
 }
 
-// // Method Update
-// func (r *accountRepository) UpdateTask(task models.Account) (int, error) {
-// 	fields := []string{}
-// 	args := []any{}
-// 	idx := 1
+// Method Update
+func (r *accountRepository) UpdateAccount(account models.Account) (string, error) {
+	fields := []string{}
+	args := []any{}
+	idx := 1
 
-// 	// Cek title
-// 	if task.Title != "" {
-// 		fields = append(fields, fmt.Sprintf("title = $%d", idx))
-// 		args = append(args, task.Title)
-// 		idx++
-// 	}
+	// Cek AccountNumber
+	if account.AccountNumber != "" {
+		fields = append(fields, fmt.Sprintf("account_number = $%d", idx))
+		args = append(args, account.AccountNumber)
+		idx++
+	}
 
-// 	// Cek Desc
-// 	if task.Description != "" {
-// 		fields = append(fields, fmt.Sprintf("description = $%d", idx))
-// 		args = append(args, task.Description)
-// 		idx++
-// 	}
+	// Cek AccountHolder
+	if account.AccountHolder != "" {
+		fields = append(fields, fmt.Sprintf("account_holder = $%d", idx))
+		args = append(args, account.AccountHolder)
+		idx++
+	}
 
-// 	// selalu diupdate jika ada di payload
-// 	fields = append(fields, fmt.Sprintf("is_completed = $%d", idx))
-// 	args = append(args, task.IsCompleted)
-// 	idx++
+	// Jika tidak ada field yang diupdate
+	if len(fields) == 0 {
+		return "", fmt.Errorf("tidak ada field yang diupdate")
+	}
 
-// 	// Jika tidak ada field yang diupdate
-// 	if len(fields) == 0 {
-// 		return 0, fmt.Errorf("tidak ada field yang diupdate")
-// 	}
+	// Perbarui UpdatedAt
+	fields = append(fields, fmt.Sprintf("updated_at = $%d", idx))
+	args = append(args, time.Now())
+	idx++
 
-// 	// Tambahkan ID sebagai kondisi WHERE
-// 	args = append(args, task.ID)
-// 	query := fmt.Sprintf(
-// 		"UPDATE tasks SET %s WHERE id = $%d",
-// 		strings.Join(fields, ", "),
-// 		idx,
-// 	)
+	// Tambahkan ID sebagai kondisi WHERE
+	args = append(args, account.ID)
+	query := fmt.Sprintf(
+		"UPDATE accounts SET %s WHERE id = $%d",
+		strings.Join(fields, ", "),
+		idx,
+	)
 
-// 	// Query Execution
-// 	fmt.Printf("Query [task][repo]: %v \n", query)
-// 	fmt.Printf("Args [task][repo]: %v \n", args)
-// 	result, err := r.db.Exec(query, args...)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("gagal update task: %w", err)
-// 	}
+	// Query Execution
+	fmt.Printf("Query [account][repo]: %v \n", query)
+	fmt.Printf("Args [account][repo]: %v \n", args)
 
-// 	// Cek apakah data dengan ID tersebut ditemukan
-// 	rowsAffected, err := result.RowsAffected()
-// 	if err != nil {
-// 		return 0, fmt.Errorf("gagal membaca rows affected: %w", err)
-// 	}
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return "", fmt.Errorf("gagal update task: %w", err)
+	}
 
-// 	if rowsAffected == 0 {
-// 		return 0, fmt.Errorf("task dengan id %d tidak ditemukan", task.ID)
-// 	}
+	// Cek apakah data dengan ID tersebut ditemukan
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("gagal membaca rows affected: %w", err)
+	}
 
-// 	return task.ID, nil
-// }
+	if rowsAffected == 0 {
+		return "", fmt.Errorf("account dengan id %s tidak ditemukan", account.ID)
+	}
 
-// // Method Delete
-// func (r *accountRepository) DeleteTask(id int) error {
-// 	query := `DELETE FROM tasks WHERE id = $1`
+	return account.ID.String(), nil
+}
 
-// 	result, err := r.db.Exec(query, id)
-// 	if err != nil {
-// 		return fmt.Errorf("gagal menghapus task: %w", err)
-// 	}
+// Method Delete
+func (r *accountRepository) DeleteAccount(id string) error {
+	query := `DELETE FROM accounts WHERE id = $1`
 
-// 	rowsAffected, err := result.RowsAffected()
-// 	if err != nil {
-// 		return fmt.Errorf("gagal membaca rows affected: %w", err)
-// 	}
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("gagal menghapus account: %w", err)
+	}
 
-// 	if rowsAffected == 0 {
-// 		return fmt.Errorf("task dengan id %d tidak ditemukan", id)
-// 	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("gagal membaca rows affected: %w", err)
+	}
 
-// 	return nil
-// }
+	if rowsAffected == 0 {
+		return fmt.Errorf("account dengan id %s tidak ditemukan", id)
+	}
+
+	return nil
+}

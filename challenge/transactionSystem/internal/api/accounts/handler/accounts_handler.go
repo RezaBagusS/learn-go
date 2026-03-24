@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -40,6 +41,14 @@ func (a *AccountsHandler) MapRoutes() {
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPost, "/account"),
 		a.Create(),
+	)
+	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodPatch, "/account/{id}"),
+		a.Update(),
+	)
+	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodDelete, "/account/{id}"),
+		a.Delete(),
 	)
 }
 
@@ -105,5 +114,50 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data account baru", map[string]any{
 			"account": newBank,
 		})
+	}
+}
+
+// PATCH /account/{id}
+func (h *AccountsHandler) Update() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		idStr := r.PathValue("id")
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+
+		var payload models.Account
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			dto.WriteError(w, http.StatusBadRequest, "Format JSON tidak valid!")
+			return
+		}
+
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
+		payload.ID = uuid.MustParse(idStr)
+
+		updatedId, err := h.svc.PatchAccountById(payload)
+		if err != nil {
+			dto.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data account", map[string]any{
+			"id": updatedId,
+		})
+	}
+}
+
+// DELETE /account/{id}
+func (h *AccountsHandler) Delete() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		idStr := r.PathValue("id")
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+
+		err := h.svc.DeleteAccountById(idStr)
+		if err != nil {
+			dto.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil menghapus akun dengan id : %s", idStr), map[string]any{})
 	}
 }

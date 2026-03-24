@@ -14,9 +14,9 @@ import (
 type AccountsService interface {
 	FetchAllAccounts() ([]models.Account, error)
 	FetchAccountById(id string) (models.Account, error)
-	CreateNewAccount(task models.Account) (models.Account, error)
-	// PatchTaskById(task models.Task) (int, error)
-	// DeleteTaskById(id int) error
+	CreateNewAccount(account models.Account) (models.Account, error)
+	PatchAccountById(account models.Account) (string, error)
+	DeleteAccountById(id string) error
 }
 
 type accountsService struct {
@@ -44,7 +44,7 @@ func (s *accountsService) FetchAccountById(id string) (models.Account, error) {
 	return s.repo.GetAccountById(id)
 }
 
-// Create new task
+// Create new account
 func (s *accountsService) CreateNewAccount(account models.Account) (models.Account, error) {
 
 	if account.BankCode == "" || account.AccountNumber == "" || account.AccountHolder == "" {
@@ -67,22 +67,24 @@ func (s *accountsService) CreateNewAccount(account models.Account) (models.Accou
 	return account, nil
 }
 
-// // Update task
-// func (s *taskService) PatchTaskById(task models.Task) (int, error) {
-// 	getId, err := s.repo.UpdateTask(task)
-// 	if err != nil {
-// 		return 0, err
-// 	}
+// Update account
+func (s *accountsService) PatchAccountById(account models.Account) (string, error) {
+	getId, err := s.repo.UpdateAccount(account)
+	if err != nil {
+		return "", err
+	}
 
-// 	return getId, nil
-// }
+	return getId, nil
+}
 
-// // Delete task
-// func (s *taskService) DeleteTaskById(id int) error {
-// 	err := s.repo.DeleteTask(id)
-// 	if err != nil {
-// 		return err
-// 	}
+// Delete account
+func (s *accountsService) DeleteAccountById(id string) error {
 
-// 	return nil
-// }
+	_, err := uuid.Parse(id)
+	if err != nil {
+		// Jika gagal di-parse, kembalikan error validasi
+		return fmt.Errorf("format ID tidak valid atau Data tidak ditemukan")
+	}
+
+	return s.repo.DeleteAccount(id)
+}
