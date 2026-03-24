@@ -44,7 +44,7 @@ func (s *transactionService) FetchTransactionById(id string) (models.Transaction
 	return s.repo.GetTransactionById(id)
 }
 
-// Create new bank
+// Create new transaction
 func (s *transactionService) CreateTrx(trx models.Transaction) (string, error) {
 	if trx.FromAccountID == "" || trx.ToAccountID == "" {
 		return "", errors.New("rekening pengirim dan penerima tidak boleh kosong")

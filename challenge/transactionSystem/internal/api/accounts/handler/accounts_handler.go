@@ -39,6 +39,10 @@ func (a *AccountsHandler) MapRoutes() {
 		a.GetById(),
 	)
 	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodGet, "/account/{id}/transactions"),
+		a.GetTransactions(),
+	)
+	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPost, "/account"),
 		a.Create(),
 	)
@@ -89,6 +93,27 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr))
 		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr), map[string]any{
 			"account": account,
+		})
+	}
+}
+
+// GET /account/{id}/transactions
+func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		idStr := r.PathValue("id")
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+
+		transactions, err := h.svc.FetchTransactionsByAccountId(idStr)
+		if err != nil {
+			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data transaksi terkait akun dengan id = %s", idStr))
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data transaksi terkait akun dengan id = %s", idStr), map[string]any{
+			"transactions": transactions,
 		})
 	}
 }

@@ -29,7 +29,7 @@ func NewBankRepository(db *sqlx.DB) BankRepository {
 // Get All
 func (r *bankRepository) GetAllBanks() ([]models.Bank, error) {
 	var banks []models.Bank
-	query := "SELECT id, bank_code, bank_name, created_at FROM banks"
+	query := "SELECT id, bank_code, bank_name, created_at FROM banks ORDER BY created_at desc"
 
 	err := r.db.Select(&banks, query)
 	if err != nil {

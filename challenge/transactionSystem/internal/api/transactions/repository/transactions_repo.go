@@ -31,7 +31,10 @@ func NewtransactionRepository(db *sqlx.DB) TransactionRepository {
 // Get All
 func (r *transactionRepository) GetAllTransactions() ([]models.Transaction, error) {
 	var transactions []models.Transaction
-	query := "SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions"
+	query := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at 
+	FROM transactions
+	ORDER BY created_at desc
+	`
 
 	err := r.db.Select(&transactions, query)
 	if err != nil {
@@ -51,7 +54,7 @@ func (r *transactionRepository) GetTransactionById(id string) (models.Transactio
 
 	helper.PrintLog("transaction", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaction by id = %s", id))
 	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
-	query := "SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions WHERE id = $1"
+	query := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions WHERE id = $1`
 
 	err := r.db.Select(&transactions, query, id)
 	if err != nil {

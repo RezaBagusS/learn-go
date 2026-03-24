@@ -16,6 +16,7 @@ import (
 type AccountRepository interface {
 	GetAllAccounts() ([]models.Account, error)
 	GetAccountById(id string) (models.Account, error)
+	GetTransactionsByAccountId(id string) ([]models.Transaction, error)
 	CreateAccount(account models.Account) (string, error)
 	UpdateAccount(account models.Account) (string, error)
 	DeleteAccount(id string) error
@@ -32,7 +33,8 @@ func NewAccountRepository(db *sqlx.DB) AccountRepository {
 // Get All
 func (r *accountRepository) GetAllAccounts() ([]models.Account, error) {
 	var accounts []models.Account
-	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts"
+	query := `SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at 
+	FROM accounts ORDER BY updated_at desc`
 
 	err := r.db.Select(&accounts, query)
 	if err != nil {
@@ -74,6 +76,27 @@ func (r *accountRepository) GetAccountById(id string) (models.Account, error) {
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan akun dengan id = %s -> %+v", id, account))
 
 	return account, nil
+}
+
+// Get Transaction by Account Id
+func (r *accountRepository) GetTransactionsByAccountId(id string) ([]models.Transaction, error) {
+	var transactions []models.Transaction
+
+	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaksi untuk akun dengan id = %s", id))
+	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
+	query := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions 
+	WHERE from_account_id = $1 OR to_account_id = $2
+	ORDER BY created_at desc`
+
+	err := r.db.Select(&transactions, query, id, id)
+	if err != nil {
+		helper.PrintLog("account", helper.LogPositionRepo, "gagal mengambil data dari db")
+		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err)
+	}
+
+	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan seluruh transaksi terkait akun dengan id = %s -> %+v", id, transactions))
+
+	return transactions, nil
 }
 
 // Post Create New Account

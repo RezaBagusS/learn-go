@@ -5,6 +5,8 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"fmt"
+
+	"github.com/google/uuid"
 	// "errors"
 )
 
@@ -71,10 +73,12 @@ func (s *bankService) PatchBank(bank models.Bank) (string, error) {
 
 // Delete bank
 func (s *bankService) DeleteBank(bankId string) error {
-	err := s.repo.DeleteBank(bankId)
+
+	_, err := uuid.Parse(bankId)
 	if err != nil {
-		return err
+		// Jika gagal di-parse, kembalikan error validasi
+		return fmt.Errorf("format ID tidak valid: harus berupa UUID")
 	}
 
-	return nil
+	return s.repo.DeleteBank(bankId)
 }

@@ -14,6 +14,7 @@ import (
 type AccountsService interface {
 	FetchAllAccounts() ([]models.Account, error)
 	FetchAccountById(id string) (models.Account, error)
+	FetchTransactionsByAccountId(id string) ([]models.Transaction, error)
 	CreateNewAccount(account models.Account) (models.Account, error)
 	PatchAccountById(account models.Account) (string, error)
 	DeleteAccountById(id string) error
@@ -42,6 +43,18 @@ func (s *accountsService) FetchAccountById(id string) (models.Account, error) {
 	}
 
 	return s.repo.GetAccountById(id)
+}
+
+// Fetch Transaction by Account Id
+func (s *accountsService) FetchTransactionsByAccountId(id string) ([]models.Transaction, error) {
+
+	_, err := uuid.Parse(id)
+	if err != nil {
+		// Jika gagal di-parse, kembalikan error validasi
+		return nil, fmt.Errorf("format ID tidak valid atau Data tidak ditemukan")
+	}
+
+	return s.repo.GetTransactionsByAccountId(id)
 }
 
 // Create new account
