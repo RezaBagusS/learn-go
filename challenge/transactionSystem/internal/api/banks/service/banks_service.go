@@ -12,8 +12,8 @@ type BankService interface {
 	FetchAllBanks() ([]models.Bank, error)
 	// FetchAccountById(id string) (models.Account, error)
 	CreateNewBank(bank models.Bank) (models.Bank, error)
-	// PatchTaskById(task models.Task) (int, error)
-	// DeleteTaskById(id int) error
+	PatchBank(bank models.Bank) (string, error)
+	DeleteBank(bankCode string) error
 }
 
 type bankService struct {
@@ -59,22 +59,22 @@ func (s *bankService) CreateNewBank(bank models.Bank) (models.Bank, error) {
 	return bank, nil
 }
 
-// // Update task
-// func (s *taskService) PatchTaskById(task models.Task) (int, error) {
-// 	getId, err := s.repo.UpdateTask(task)
-// 	if err != nil {
-// 		return 0, err
-// 	}
+// Update task
+func (s *bankService) PatchBank(bank models.Bank) (string, error) {
+	bankId, err := s.repo.UpdateBank(bank)
+	if err != nil {
+		return "", err
+	}
 
-// 	return getId, nil
-// }
+	return bankId, nil
+}
 
-// // Delete task
-// func (s *taskService) DeleteTaskById(id int) error {
-// 	err := s.repo.DeleteTask(id)
-// 	if err != nil {
-// 		return err
-// 	}
+// Delete bank
+func (s *bankService) DeleteBank(bankId string) error {
+	err := s.repo.DeleteBank(bankId)
+	if err != nil {
+		return err
+	}
 
-// 	return nil
-// }
+	return nil
+}

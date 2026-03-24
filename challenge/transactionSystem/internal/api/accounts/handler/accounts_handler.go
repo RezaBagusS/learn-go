@@ -131,7 +131,15 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		}
 
 		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
-		payload.ID = uuid.MustParse(idStr)
+
+		accountIdParse, err := uuid.Parse(idStr)
+		if err != nil {
+			// Jika gagal di-parse, kembalikan error validasi
+			dto.WriteError(w, http.StatusBadRequest, "format ID tidak valid atau Data tidak ditemukan")
+			return
+		}
+
+		payload.ID = accountIdParse
 
 		updatedId, err := h.svc.PatchAccountById(payload)
 		if err != nil {

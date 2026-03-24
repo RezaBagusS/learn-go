@@ -89,6 +89,10 @@ func (r *accountRepository) CreateAccount(account models.Account) (string, error
 			if pqErr.Code == "23505" {
 				return "", fmt.Errorf("nomor rekening %s sudah terdaftar untuk bank %s", account.AccountNumber, account.BankCode)
 			}
+			// [23503] Violates Foreign Key
+			if pqErr.Code == "23503" {
+				return "", fmt.Errorf("kode bank %s tidak terdaftar pada sistem", account.BankCode)
+			}
 		}
 
 		return "", fmt.Errorf("gagal insert account ke db: %w", err)
@@ -141,7 +145,14 @@ func (r *accountRepository) UpdateAccount(account models.Account) (string, error
 
 	result, err := r.db.Exec(query, args...)
 	if err != nil {
-		return "", fmt.Errorf("gagal update task: %w", err)
+		if pqErr, ok := err.(*pq.Error); ok {
+			// [23505] Unique Violation
+			if pqErr.Code == "23505" {
+				return "", fmt.Errorf("nomor rekening %s sudah terdaftar pada sistem", account.AccountNumber)
+			}
+		}
+
+		return "", fmt.Errorf("gagal update account ke db: %w", err)
 	}
 
 	// Cek apakah data dengan ID tersebut ditemukan
