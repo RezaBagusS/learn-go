@@ -15,5 +15,6 @@ func main() {
 	// Q2()
 	// day.Day3()
 	// baseCodeAPI.BaseAPI()
-	challenge.Challenge2()
+	// challenge.Challenge2()
+	challenge.Challenge3()
 }

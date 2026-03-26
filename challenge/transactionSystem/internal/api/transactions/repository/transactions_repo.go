@@ -4,10 +4,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"fmt"
-
-	// "strings"
-
-	// "strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -16,6 +13,7 @@ type TransactionRepository interface {
 	GetAllTransactions() ([]models.Transaction, error)
 	GetTransactionById(id string) (models.Transaction, error)
 	CreateTransaction(trx models.Transaction) (string, error)
+	GetSummary(date time.Time) ([]models.Transaction, error)
 	// UpdateBank(bank models.Bank) (string, error)
 	// DeleteBank(bankCode string) error
 }
@@ -37,6 +35,27 @@ func (r *transactionRepository) GetAllTransactions() ([]models.Transaction, erro
 	`
 
 	err := r.db.Select(&transactions, query)
+	if err != nil {
+		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
+	}
+
+	if transactions == nil {
+		transactions = []models.Transaction{}
+	}
+
+	return transactions, nil
+}
+
+// Get Transaction on today
+func (r *transactionRepository) GetSummary(date time.Time) ([]models.Transaction, error) {
+	transactions := make([]models.Transaction, 0)
+
+	query := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at 
+	FROM transactions
+	WHERE DATE(created_at) = Date($1)
+	ORDER BY created_at desc
+	`
+	err := r.db.Select(&transactions, query, date)
 	if err != nil {
 		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
 	}

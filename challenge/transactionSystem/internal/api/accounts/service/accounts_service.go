@@ -6,6 +6,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 	// "errors"
@@ -14,7 +15,7 @@ import (
 type AccountsService interface {
 	FetchAllAccounts() ([]models.Account, error)
 	FetchAccountById(id string) (models.Account, error)
-	FetchTransactionsByAccountId(id string) ([]models.Transaction, error)
+	FetchTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error)
 	CreateNewAccount(account models.Account) (models.Account, error)
 	PatchAccountById(account models.Account) (string, error)
 	DeleteAccountById(id string) error
@@ -46,7 +47,9 @@ func (s *accountsService) FetchAccountById(id string) (models.Account, error) {
 }
 
 // Fetch Transaction by Account Id
-func (s *accountsService) FetchTransactionsByAccountId(id string) ([]models.Transaction, error) {
+func (s *accountsService) FetchTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error) {
+
+	trxTypeEnum := []string{"all", "in", "out"}
 
 	_, err := uuid.Parse(id)
 	if err != nil {
@@ -54,7 +57,13 @@ func (s *accountsService) FetchTransactionsByAccountId(id string) ([]models.Tran
 		return nil, fmt.Errorf("format ID tidak valid atau Data tidak ditemukan")
 	}
 
-	return s.repo.GetTransactionsByAccountId(id)
+	isValidType := slices.Contains(trxTypeEnum, trxType)
+
+	if !isValidType {
+		return nil, fmt.Errorf("Tipe transaksi tidak ditemukan (all/in/out)!")
+	}
+
+	return s.repo.GetTransactionsByAccountId(id, trxType)
 }
 
 // Create new account

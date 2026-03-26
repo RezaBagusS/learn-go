@@ -6,6 +6,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	// "errors"
@@ -15,6 +16,7 @@ type TransactionService interface {
 	FetchAllTransactions() ([]models.Transaction, error)
 	FetchTransactionById(id string) (models.Transaction, error)
 	CreateTrx(trx models.Transaction) (string, error)
+	FetchSummaryToday(date time.Time) ([]models.Transaction, error)
 	// PatchBank(bank models.Bank) (string, error)
 	// DeleteBank(bankCode string) error
 }
@@ -30,6 +32,16 @@ func NewTransactionsService(repo repository.TransactionRepository) TransactionSe
 // Fetch All Data
 func (s *transactionService) FetchAllTransactions() ([]models.Transaction, error) {
 	return s.repo.GetAllTransactions()
+}
+
+// Fetch Transaction by date only
+func (s *transactionService) FetchSummaryToday(date time.Time) ([]models.Transaction, error) {
+
+	if date.After(time.Now()) {
+		return nil, fmt.Errorf("tidak dapat mencari riwayat di masa depan")
+	}
+
+	return s.repo.GetSummary(date)
 }
 
 // Fetch Transaction by Id

@@ -97,14 +97,19 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 	}
 }
 
-// GET /account/{id}/transactions
+// GET /account/{id}/transactions?type=all/in/out
 func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		idStr := r.PathValue("id")
+		trxType := r.URL.Query().Get("type")
 		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
 
-		transactions, err := h.svc.FetchTransactionsByAccountId(idStr)
+		if trxType == "" {
+			trxType = "all"
+		}
+
+		transactions, err := h.svc.FetchTransactionsByAccountId(idStr, trxType)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
 			dto.WriteError(w, http.StatusInternalServerError, err.Error())

@@ -16,7 +16,7 @@ import (
 type AccountRepository interface {
 	GetAllAccounts() ([]models.Account, error)
 	GetAccountById(id string) (models.Account, error)
-	GetTransactionsByAccountId(id string) ([]models.Transaction, error)
+	GetTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error)
 	CreateAccount(account models.Account) (string, error)
 	UpdateAccount(account models.Account) (string, error)
 	DeleteAccount(id string) error
@@ -79,16 +79,33 @@ func (r *accountRepository) GetAccountById(id string) (models.Account, error) {
 }
 
 // Get Transaction by Account Id
-func (r *accountRepository) GetTransactionsByAccountId(id string) ([]models.Transaction, error) {
+func (r *accountRepository) GetTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error) {
 	var transactions []models.Transaction
 
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaksi untuk akun dengan id = %s", id))
 	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
-	query := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions 
-	WHERE from_account_id = $1 OR to_account_id = $2
-	ORDER BY created_at desc`
+	baseQuery := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions`
 
-	err := r.db.Select(&transactions, query, id, id)
+	var whereQuery string
+	var orderByQuery string = "ORDER BY created_at desc"
+	switch {
+	case trxType == "all":
+		whereQuery = "WHERE from_account_id = $1 OR to_account_id = $2"
+	case trxType == "in":
+		whereQuery = "WHERE to_account_id = $1"
+	case trxType == "out":
+		whereQuery = "WHERE from_account_id = $1"
+	}
+
+	query := baseQuery + " " + whereQuery + " " + orderByQuery
+
+	var err error
+	if trxType == "all" {
+		err = r.db.Select(&transactions, query, id, id)
+	} else {
+		err = r.db.Select(&transactions, query, id)
+	}
+
 	if err != nil {
 		helper.PrintLog("account", helper.LogPositionRepo, "gagal mengambil data dari db")
 		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err)

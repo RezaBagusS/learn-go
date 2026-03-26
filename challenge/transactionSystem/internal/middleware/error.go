@@ -2,8 +2,20 @@ package middleware
 
 import (
 	"belajar-go/challenge/transactionSystem/dto"
+	"errors"
 	"fmt"
 	"net/http"
+)
+
+var (
+	ErrDataNotFound      = errors.New("data tidak ditemukan")
+	ErrInvalidUUIDFormat = errors.New("format ID tidak valid: harus berupa UUID")
+	ErrFetchIssue        = errors.New("gagal mengambil data dari db")
+	ErrTrxFutureHistory  = errors.New("tidak dapat mencari riwayat di masa depan")
+	ErrEmptyAccount      = errors.New("rekening pengirim dan penerima tidak boleh kosong")
+	ErrInvalidAmount     = errors.New("nominal transfer harus lebih besar dari 0")
+	ErrSelfTransfer      = errors.New("tidak dapat melakukan transfer ke rekening sendiri")
+	ErrNoteTooLong       = errors.New("catatan transfer maksimal 255 karakter")
 )
 
 type responseInterceptor struct {

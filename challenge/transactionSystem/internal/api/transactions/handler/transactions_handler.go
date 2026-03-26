@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -32,6 +33,10 @@ func (a *TransactionsHandler) MapRoutes() {
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/transactions"),
 		a.GetAll(),
+	)
+	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodGet, "/transactions/summary"),
+		a.GetSummary(),
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/transaction/{id}"),
@@ -58,6 +63,35 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 
 		helper.PrintLog("transaction", helper.LogPositionHandler, "Berhasil mengambil list data transaksi")
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data transaksi", map[string]any{
+			"transactions": transactions,
+		})
+	}
+}
+
+// GET /transactions/summary
+func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		dateStr := r.URL.Query().Get("date")
+
+		if dateStr == "" {
+			helper.PrintLog("transaction", helper.LogPositionHandler, "Query parameter tidak ditemukan ...")
+			dto.WriteError(w, http.StatusInternalServerError, "Parameter date tidak ditemukan")
+			return
+		}
+
+		// YYYY-MM-DD
+		timeParse, err := time.Parse("2006-01-02", dateStr)
+
+		transactions, err := h.svc.FetchSummaryToday(timeParse)
+		if err != nil {
+			helper.PrintLog("transaction", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		helper.PrintLog("transaction", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil list data transaksi pada tanggal %s", dateStr))
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil list data transaksi pada tanggal %s", dateStr), map[string]any{
 			"transactions": transactions,
 		})
 	}
