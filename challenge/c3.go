@@ -90,16 +90,30 @@ var TransferData = []TransferDataStruct{
 	},
 }
 
-func transaction(i int, data []SampleDataStruct, mtx *sync.Mutex, ctx context.Context) {
+func transaction(i int, data []SampleDataStruct, mtx *sync.Mutex, ctx context.Context, wg *sync.WaitGroup) {
 
 	randomDuration := time.Duration(rand.Intn(5)+1) * time.Second
-	second := int(randomDuration / time.Second)
+	// second := int(randomDuration / time.Second)
+
+	defer wg.Done()
 
 	tx := TransferData[i]
-	log.Printf("Processing TX-%d (%ds) | %s -> %s | Rp%d\n", tx.ID, second, tx.FromRekening, tx.ToRekening, tx.Amount)
+	log.Printf("Processing TX-%d (%ds) | %s -> %s | Rp%d\n", tx.ID, randomDuration, tx.FromRekening, tx.ToRekening, tx.Amount)
 
 	select {
 	case <-time.After(randomDuration):
+
+		deadline, ok := ctx.Deadline()
+
+		if ok {
+
+			log.Println(time.Until(deadline), "TX-", tx.ID)
+			if time.Until(deadline) < 0 {
+				log.Printf("TX-%d TIMEOUT\n", TransferData[i].ID)
+				return
+			}
+
+		}
 
 		mtx.Lock()
 		defer mtx.Unlock()
@@ -146,11 +160,10 @@ func Challenge3() {
 
 	for i := 0; i < len(TransferData); i++ {
 		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			transaction(idx, data, &mtx, ctx)
-			cancel()
+		go func(i int) {
+			ctx, cancel := context.WithTimeout(context.Background(), 4998*time.Millisecond)
+			defer cancel()
+			transaction(i, data, &mtx, ctx, &wg)
 		}(i)
 	}
 
