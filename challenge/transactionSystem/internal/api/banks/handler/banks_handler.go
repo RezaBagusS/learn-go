@@ -143,7 +143,7 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 			return
 		}
 
-		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data bank", map[string]any{
+		dto.WriteResponse(w, http.StatusPartialContent, "Berhasil mengupdate data bank", map[string]any{
 			"id": returnId,
 		})
 	}
