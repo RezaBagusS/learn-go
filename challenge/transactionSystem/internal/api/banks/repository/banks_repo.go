@@ -2,7 +2,10 @@ package repository
 
 import (
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"database/sql"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	// "strings"
@@ -13,6 +16,7 @@ import (
 
 type BankRepository interface {
 	GetAllBanks() ([]models.Bank, error)
+	GetBankByCode(bankCode string) (*models.Bank, error)
 	CreateBank(bank models.Bank) (string, error)
 	UpdateBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
@@ -41,6 +45,26 @@ func (r *bankRepository) GetAllBanks() ([]models.Bank, error) {
 	}
 
 	return banks, nil
+}
+
+// Get Bank by Bank Code
+func (r *bankRepository) GetBankByCode(bankCode string) (*models.Bank, error) {
+	var bank models.Bank
+	query := "SELECT id, bank_code, bank_name, created_at FROM banks WHERE bank_code = $1"
+	log.Printf("Kode bank : %s", bankCode)
+
+	err := r.db.Get(&bank, query, bankCode)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Printf("Data bank tidak ditemukan")
+			return nil, fmt.Errorf("Data bank tidak ditemukan")
+		}
+
+		log.Printf("Gagal mengambil data dari db : %s", err)
+		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
+	}
+
+	return &bank, nil
 }
 
 // Post Create New Bank

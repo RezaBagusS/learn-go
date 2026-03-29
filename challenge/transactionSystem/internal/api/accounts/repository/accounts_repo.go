@@ -3,6 +3,8 @@ package repository
 import (
 	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,7 +17,7 @@ import (
 
 type AccountRepository interface {
 	GetAllAccounts() ([]models.Account, error)
-	GetAccountById(id string) (models.Account, error)
+	GetAccountById(id string) (*models.Account, error)
 	GetTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error)
 	CreateAccount(account models.Account) (string, error)
 	UpdateAccount(account models.Account) (string, error)
@@ -38,7 +40,7 @@ func (r *accountRepository) GetAllAccounts() ([]models.Account, error) {
 
 	err := r.db.Select(&accounts, query)
 	if err != nil {
-		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
+		return nil, models.ErrDatabaseIssue // Error Wrapping
 	}
 
 	if accounts == nil {
@@ -49,33 +51,28 @@ func (r *accountRepository) GetAllAccounts() ([]models.Account, error) {
 }
 
 // Get Account By ID
-func (r *accountRepository) GetAccountById(id string) (models.Account, error) {
-	var accounts []models.Account
+func (r *accountRepository) GetAccountById(id string) (*models.Account, error) {
+	var account models.Account
 
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data account by id = %s", id))
 	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
 	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts WHERE id = $1"
 
-	err := r.db.Select(&accounts, query, id)
+	err := r.db.Get(&account, query, id)
 	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, "gagal mengambil data dari db")
-		return models.Account{}, fmt.Errorf("gagal mengambil data dari db: %w", err)
+
+		if errors.Is(err, sql.ErrNoRows) {
+			helper.PrintLog("account", helper.LogPositionRepo, "ID Account tidak ditemukan")
+			return nil, models.ErrIdNotFound
+		}
+
+		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		return nil, models.ErrDatabaseIssue
 	}
 
-	if len(accounts) == 0 {
-		helper.PrintLog("account", helper.LogPositionRepo, "ID Account tidak ditemukan")
-		return models.Account{}, fmt.Errorf("akun dengan ID %s tidak ditemukan", id)
-	}
-
-	if len(accounts) > 1 {
-		helper.PrintLog("account", helper.LogPositionRepo, "Terdapat lebih dari 1 akun")
-		return models.Account{}, fmt.Errorf("terdapat lebih dari 1 akun dengan ID %s", id)
-	}
-
-	account := accounts[0]
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan akun dengan id = %s -> %+v", id, account))
 
-	return account, nil
+	return &account, nil
 }
 
 // Get Transaction by Account Id
@@ -83,6 +80,7 @@ func (r *accountRepository) GetTransactionsByAccountId(id string, trxType string
 	var transactions []models.Transaction
 
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaksi untuk akun dengan id = %s", id))
+
 	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
 	baseQuery := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions`
 
@@ -106,9 +104,13 @@ func (r *accountRepository) GetTransactionsByAccountId(id string, trxType string
 		err = r.db.Select(&transactions, query, id)
 	}
 
+	if transactions == nil {
+		transactions = []models.Transaction{}
+	}
+
 	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, "gagal mengambil data dari db")
-		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err)
+		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		return nil, models.ErrDatabaseIssue
 	}
 
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan seluruh transaksi terkait akun dengan id = %s -> %+v", id, transactions))
@@ -121,21 +123,21 @@ func (r *accountRepository) CreateAccount(account models.Account) (string, error
 	var newAccount string
 	query := `INSERT INTO accounts (bank_code, account_number, account_holder, balance) VALUES ($1, $2, $3, $4) RETURNING id`
 
+	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Menambahkan data akun = %+v", account))
+
 	// Gunakan QueryRowx untuk mengeksekusi insert dan menangkap RETURNING id
 	err := r.db.QueryRowx(query, account.BankCode, account.AccountNumber, account.AccountHolder, account.Balance).Scan(&newAccount)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				return "", fmt.Errorf("nomor rekening %s sudah terdaftar untuk bank %s", account.AccountNumber, account.BankCode)
-			}
-			// [23503] Violates Foreign Key
-			if pqErr.Code == "23503" {
-				return "", fmt.Errorf("kode bank %s tidak terdaftar pada sistem", account.BankCode)
+				helper.PrintLog("account", helper.LogPositionRepo, models.ErrDuplicateAccount.Error())
+				return "", models.ErrDuplicateAccount
 			}
 		}
 
-		return "", fmt.Errorf("gagal insert account ke db: %w", err)
+		helper.PrintLog("account", helper.LogPositionRepo, models.ErrDatabaseFailed.Error())
+		return "", models.ErrDatabaseFailed
 	}
 
 	return newAccount, nil
@@ -161,11 +163,6 @@ func (r *accountRepository) UpdateAccount(account models.Account) (string, error
 		idx++
 	}
 
-	// Jika tidak ada field yang diupdate
-	if len(fields) == 0 {
-		return "", fmt.Errorf("tidak ada field yang diupdate")
-	}
-
 	// Perbarui UpdatedAt
 	fields = append(fields, fmt.Sprintf("updated_at = $%d", idx))
 	args = append(args, time.Now())
@@ -188,21 +185,24 @@ func (r *accountRepository) UpdateAccount(account models.Account) (string, error
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				return "", fmt.Errorf("nomor rekening %s sudah terdaftar pada sistem", account.AccountNumber)
+				helper.PrintLog("account", helper.LogPositionRepo, models.ErrDuplicateAccount.Error())
+				return "", models.ErrDuplicateAccount
 			}
 		}
 
-		return "", fmt.Errorf("gagal update account ke db: %w", err)
+		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		return "", models.ErrDatabaseFailed
 	}
 
-	// Cek apakah data dengan ID tersebut ditemukan
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return "", fmt.Errorf("gagal membaca rows affected: %w", err)
+		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		return "", models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		return "", fmt.Errorf("account dengan id %s tidak ditemukan", account.ID)
+		helper.PrintLog("account", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+		return "", models.ErrIdNotFound
 	}
 
 	return account.ID.String(), nil
@@ -214,16 +214,19 @@ func (r *accountRepository) DeleteAccount(id string) error {
 
 	result, err := r.db.Exec(query, id)
 	if err != nil {
-		return fmt.Errorf("gagal menghapus account: %w", err)
+		helper.PrintLog("account", helper.LogPositionRepo, models.ErrDeleteFailed.Error())
+		return models.ErrDeleteFailed
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("gagal membaca rows affected: %w", err)
+		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		return models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("account dengan id %s tidak ditemukan", id)
+		helper.PrintLog("account", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+		return models.ErrIdNotFound
 	}
 
 	return nil

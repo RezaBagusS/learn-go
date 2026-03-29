@@ -68,26 +68,26 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 	}
 }
 
-// GET /account/{id}
-// func (h *AccountsHandler) GetById() http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
+// GET /bank/{bankCode}
+func (h *BanksHandler) GetByCode() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 
-// 		idStr := r.PathValue("id")
-// 		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+		codeStr := r.PathValue("bankCode")
+		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan kode bank = %s", codeStr))
 
-// 		account, err := h.svc.FetchAccountById(idStr)
-// 		if err != nil {
-// 			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
-// 			dto.WriteError(w, http.StatusInternalServerError, err.Error())
-// 			return
-// 		}
+		bank, err := h.svc.FetchBankByCode(codeStr)
+		if err != nil {
+			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 
-// 		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr))
-// 		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr), map[string]any{
-// 			"account": account,
-// 		})
-// 	}
-// }
+		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", codeStr))
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", codeStr), map[string]any{
+			"bank": bank,
+		})
+	}
+}
 
 // POST /bank
 func (h *BanksHandler) Create() http.HandlerFunc {

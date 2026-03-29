@@ -12,7 +12,7 @@ import (
 
 type BankService interface {
 	FetchAllBanks() ([]models.Bank, error)
-	// FetchAccountById(id string) (models.Account, error)
+	FetchBankByCode(bankCode string) (*models.Bank, error)
 	CreateNewBank(bank models.Bank) (models.Bank, error)
 	PatchBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
@@ -31,17 +31,10 @@ func (s *bankService) FetchAllBanks() ([]models.Bank, error) {
 	return s.repo.GetAllBanks()
 }
 
-// Fetch Account by Id
-// func (s *bankService) FetchAccountById(id string) (models.Bank, error) {
-
-// 	_, err := uuid.Parse(id)
-// 	if err != nil {
-// 		// Jika gagal di-parse, kembalikan error validasi
-// 		return models.Bank{}, fmt.Errorf("format ID tidak valid: harus berupa UUID")
-// 	}
-
-// 	return s.repo.GetAccountById(id)
-// }
+// Fetch Bank by code
+func (s *bankService) FetchBankByCode(bankCode string) (*models.Bank, error) {
+	return s.repo.GetBankByCode(bankCode)
+}
 
 // Create new bank
 func (s *bankService) CreateNewBank(bank models.Bank) (models.Bank, error) {

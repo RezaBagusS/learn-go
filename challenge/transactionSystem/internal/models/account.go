@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,23 @@ ADD CONSTRAINT unique_bank_account UNIQUE (bank_code, account_number);
 
 ALTER TABLE accounts ALTER COLUMN id SET DEFAULT gen_random_uuid();
 */
+
+var (
+	ErrDatabaseIssue  = errors.New("gagal mengambil data dari db untuk account")
+	ErrDatabaseFailed = errors.New("gagal melakukan aksi pada database")
+	ErrDeleteFailed   = errors.New("gagal menghapus data")
+
+	ErrInvalidUuid        = errors.New("Format tidak valid")
+	ErrInvalidInitBalance = errors.New("Balance tidak boleh minus")
+	ErrInvalidJsonFormat  = errors.New("Format JSON tidak valid")
+	ErrInvalidTrxType     = errors.New("Tipe transaksi tidak sesuai (all/in/out)")
+	ErrInvalidBankCode    = errors.New("Kode bank tidak terdaftar pada sistem")
+	ErrInvalidField       = errors.New("Terdapat field yang kosong")
+
+	ErrIdNotFound = errors.New("data tidak ditemukan")
+
+	ErrDuplicateAccount = errors.New("Nomor rekening sudah terdaftar")
+)
 
 type Account struct {
 	ID            uuid.UUID `db:"id" json:"id"`               // Primary Key
