@@ -3,6 +3,8 @@ package repository
 import (
 	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,7 +13,7 @@ import (
 
 type TransactionRepository interface {
 	GetAllTransactions() ([]models.Transaction, error)
-	GetTransactionById(id string) (models.Transaction, error)
+	GetTransactionById(id string) (*models.Transaction, error)
 	CreateTransaction(trx models.Transaction) (string, error)
 	GetSummary(date time.Time) ([]models.Transaction, error)
 	// UpdateBank(bank models.Bank) (string, error)
@@ -36,7 +38,8 @@ func (r *transactionRepository) GetAllTransactions() ([]models.Transaction, erro
 
 	err := r.db.Select(&transactions, query)
 	if err != nil {
-		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
+		helper.PrintLog("transaction", helper.LogPositionRepo, err.Error())
+		return nil, models.ErrDatabaseIssue
 	}
 
 	if transactions == nil {
@@ -57,7 +60,8 @@ func (r *transactionRepository) GetSummary(date time.Time) ([]models.Transaction
 	`
 	err := r.db.Select(&transactions, query, date)
 	if err != nil {
-		return nil, fmt.Errorf("gagal mengambil data dari db: %w", err) // Error Wrapping
+		helper.PrintLog("transaction", helper.LogPositionRepo, err.Error())
+		return nil, models.ErrDatabaseFailed
 	}
 
 	if transactions == nil {
@@ -68,28 +72,28 @@ func (r *transactionRepository) GetSummary(date time.Time) ([]models.Transaction
 }
 
 // Get Transaction By ID
-func (r *transactionRepository) GetTransactionById(id string) (models.Transaction, error) {
-	var transactions []models.Transaction
+func (r *transactionRepository) GetTransactionById(id string) (*models.Transaction, error) {
+	var transaction models.Transaction
 
 	helper.PrintLog("transaction", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaction by id = %s", id))
 	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
 	query := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions WHERE id = $1`
 
-	err := r.db.Select(&transactions, query, id)
+	err := r.db.Get(&transaction, query, id)
 	if err != nil {
-		helper.PrintLog("transaction", helper.LogPositionRepo, "gagal mengambil data dari db")
-		return models.Transaction{}, fmt.Errorf("gagal mengambil data dari db: %w", err)
+
+		if errors.Is(err, sql.ErrNoRows) {
+			helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+			return nil, models.ErrIdNotFound
+		}
+
+		helper.PrintLog("transaction", helper.LogPositionRepo, err.Error())
+		return nil, models.ErrDatabaseIssue
 	}
 
-	if len(transactions) == 0 {
-		helper.PrintLog("transaction", helper.LogPositionRepo, "ID Transaksi tidak ditemukan")
-		return models.Transaction{}, fmt.Errorf("Transaksi dengan ID %s tidak ditemukan", id)
-	}
-
-	transaction := transactions[0]
 	helper.PrintLog("transaction", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan transaksi dengan id = %s -> %+v", id, transaction))
 
-	return transaction, nil
+	return &transaction, nil
 }
 
 // Post Create transaction
@@ -98,7 +102,8 @@ func (r *transactionRepository) CreateTransaction(trx models.Transaction) (strin
 	// START TRX
 	tx, err := r.db.Beginx()
 	if err != nil {
-		return "", fmt.Errorf("gagal memulai database transaction: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrDatabaseTrx.Error())
+		return "", models.ErrDatabaseTrx
 	}
 
 	// ROLLBACK
@@ -111,11 +116,12 @@ func (r *transactionRepository) CreateTransaction(trx models.Transaction) (strin
 	err = tx.QueryRow("SELECT balance, bank_code FROM accounts WHERE id = $1 FOR UPDATE", trx.FromAccountID).
 		Scan(&senderBalance, &fromBankCode)
 	if err != nil {
-		return "", fmt.Errorf("rekening pengirim tidak valid atau error: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrInvalidTrxAccount.Error())
+		return "", models.ErrInvalidTrxAccount
 	}
 
 	if senderBalance < trx.Amount {
-		return "", fmt.Errorf("saldo rekening tidak mencukupi")
+		return "", models.ErrLogicBalanceTrx
 	}
 
 	// Check Receiver
@@ -125,7 +131,8 @@ func (r *transactionRepository) CreateTransaction(trx models.Transaction) (strin
 	err = tx.QueryRow("SELECT id, bank_code FROM accounts WHERE id = $1 FOR UPDATE", trx.ToAccountID).
 		Scan(&receiverID, &toBankCode)
 	if err != nil {
-		return "", fmt.Errorf("rekening penerima tidak ditemukan: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrInvalidTrxAccount.Error())
+		return "", models.ErrInvalidTrxAccount
 	}
 
 	// Set Bank Code
@@ -135,13 +142,15 @@ func (r *transactionRepository) CreateTransaction(trx models.Transaction) (strin
 	// Sender Mutation
 	_, err = tx.Exec("UPDATE accounts SET balance = balance - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", trx.Amount, trx.FromAccountID)
 	if err != nil {
-		return "", fmt.Errorf("gagal memotong saldo pengirim: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrLogicMutationTrx.Error())
+		return "", models.ErrLogicMutationTrx
 	}
 
 	// Receiver Mutation
 	_, err = tx.Exec("UPDATE accounts SET balance = balance + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", trx.Amount, trx.ToAccountID)
 	if err != nil {
-		return "", fmt.Errorf("gagal menambah saldo penerima: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrLogicMutationTrx.Error())
+		return "", models.ErrLogicMutationTrx
 	}
 
 	// Push History Trx
@@ -158,12 +167,14 @@ func (r *transactionRepository) CreateTransaction(trx models.Transaction) (strin
 	).Scan(&insertedID)
 
 	if err != nil {
-		return "", fmt.Errorf("gagal mencatat riwayat transaksi: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, err.Error())
+		return "", models.ErrDatabaseFailed
 	}
 
 	// Commit
 	if err = tx.Commit(); err != nil {
-		return "", fmt.Errorf("gagal melakukan commit transaksi: %w", err)
+		helper.PrintLog("transaction", helper.LogPositionRepo, models.ErrLogicCommitTrx.Error())
+		return "", models.ErrLogicCommitTrx
 	}
 
 	return insertedID, nil
