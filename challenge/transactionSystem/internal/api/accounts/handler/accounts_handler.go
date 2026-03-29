@@ -9,7 +9,6 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -21,21 +20,6 @@ import (
 type AccountsHandler struct {
 	mux *http.ServeMux
 	svc service.AccountsService
-}
-
-func StatusCodeHandler(err error) int {
-	var statusCode int
-	switch {
-	case errors.Is(err, models.ErrIdNotFound):
-		statusCode = http.StatusNotFound
-	case errors.Is(err, models.ErrInvalidUuid), errors.Is(err, models.ErrInvalidInitBalance), errors.Is(err, models.ErrInvalidJsonFormat), errors.Is(err, models.ErrInvalidTrxType), errors.Is(err, models.ErrInvalidBankCode), errors.Is(err, models.ErrInvalidField):
-		statusCode = http.StatusBadRequest
-	case errors.Is(err, models.ErrDuplicateAccount):
-		statusCode = http.StatusConflict
-	default:
-		statusCode = http.StatusInternalServerError
-	}
-	return statusCode
 }
 
 func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB) *AccountsHandler {
@@ -88,7 +72,7 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		accounts, err := h.svc.FetchAllAccounts()
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
-			dto.WriteError(w, StatusCodeHandler(err), err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -109,14 +93,14 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		_, err := uuid.Parse(idStr)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
 		account, err := h.svc.FetchAccountById(idStr)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
-			dto.WriteError(w, StatusCodeHandler(err), err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -141,7 +125,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		_, err := uuid.Parse(idStr)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
@@ -154,14 +138,14 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		// Valid Trx Type
 		if !isValidType {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidTrxType.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidTrxType), models.ErrInvalidTrxType.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidTrxType), models.ErrInvalidTrxType.Error())
 			return
 		}
 
 		// Exec
 		transactions, err := h.svc.FetchTransactionsByAccountId(idStr, trxType)
 		if err != nil {
-			dto.WriteError(w, StatusCodeHandler(err), err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -180,13 +164,13 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
 		if payload.BankCode == "" || payload.AccountNumber == "" || payload.AccountHolder == "" {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidField.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
 			return
 		}
 
@@ -195,7 +179,7 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		newAccount, err := h.svc.CreateNewAccount(payload)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
-			dto.WriteError(w, StatusCodeHandler(err), err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -217,14 +201,14 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		_, err := uuid.Parse(idStr)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			helper.PrintLog("account", helper.LogPositionRepo, models.ErrInvalidJsonFormat.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
@@ -233,7 +217,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		// Jika tidak ada field yang diupdate
 		if payload.AccountHolder == "" && payload.AccountNumber == "" {
 			helper.PrintLog("account", helper.LogPositionRepo, models.ErrInvalidField.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
 			return
 		}
 
@@ -241,7 +225,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		if err != nil {
 			// Jika gagal di-parse, kembalikan error validasi
 			helper.PrintLog("account", helper.LogPositionRepo, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
@@ -250,7 +234,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		updatedId, err := h.svc.PatchAccountById(payload)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionRepo, err.Error())
-			dto.WriteError(w, StatusCodeHandler(err), err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -272,14 +256,14 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 		_, errId := uuid.Parse(idStr)
 		if errId != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
 		err := h.svc.DeleteAccountById(idStr)
 		if err != nil {
 			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
-			dto.WriteError(w, StatusCodeHandler(err), err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 

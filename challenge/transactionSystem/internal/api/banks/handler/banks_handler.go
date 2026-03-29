@@ -57,7 +57,7 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 		banks, err := h.svc.FetchAllBanks()
 		if err != nil {
 			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
-			dto.WriteError(w, http.StatusInternalServerError, err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -78,7 +78,7 @@ func (h *BanksHandler) GetByCode() http.HandlerFunc {
 		bank, err := h.svc.FetchBankByCode(codeStr)
 		if err != nil {
 			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
-			dto.WriteError(w, http.StatusInternalServerError, err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
@@ -95,7 +95,15 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 
 		var payload models.Bank
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			dto.WriteError(w, http.StatusBadRequest, "Format JSON tidak valid!")
+			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			return
+		}
+
+		// Logika Bisnis: Validasi input tidak boleh kosong
+		if payload.BankCode == "" || payload.BankName == "" {
+			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidField.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
 			return
 		}
 
@@ -103,10 +111,12 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 
 		newBank, err := h.svc.CreateNewBank(payload)
 		if err != nil {
-			dto.WriteError(w, http.StatusBadRequest, err.Error())
+			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
+		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil membuat data bank baru : %+v", newBank))
 		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data bank baru", map[string]any{
 			"bank": newBank,
 		})
@@ -122,7 +132,15 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 
 		var payload models.Bank
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			dto.WriteError(w, http.StatusBadRequest, "Format JSON tidak valid!")
+			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			return
+		}
+
+		// Logika Bisnis: Validasi input tidak boleh kosong
+		if payload.BankCode == "" && payload.BankName == "" {
+			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidField.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
 			return
 		}
 
@@ -131,7 +149,8 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 		bankIdParse, err := uuid.Parse(bankId)
 		if err != nil {
 			// Jika gagal di-parse, kembalikan error validasi
-			dto.WriteError(w, http.StatusBadRequest, "format ID tidak valid atau Data tidak ditemukan")
+			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
@@ -139,10 +158,12 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 
 		returnId, err := h.svc.PatchBank(payload)
 		if err != nil {
-			dto.WriteError(w, http.StatusBadRequest, err.Error())
+			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
+		helper.PrintLog("bank", helper.LogPositionHandler, "Berhasil mengupdate data bank")
 		dto.WriteResponse(w, http.StatusPartialContent, "Berhasil mengupdate data bank", map[string]any{
 			"id": returnId,
 		})
@@ -156,12 +177,22 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 		bankId := r.PathValue("id")
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id bank = %s", bankId))
 
-		err := h.svc.DeleteBank(bankId)
-		if err != nil {
-			dto.WriteError(w, http.StatusBadRequest, err.Error())
+		bankIdParse, errId := uuid.Parse(bankId)
+		if errId != nil {
+			// Jika gagal di-parse, kembalikan error validasi
+			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
+		err := h.svc.DeleteBank(bankIdParse.String())
+		if err != nil {
+			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+			return
+		}
+
+		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil menghapus bank : %s", bankId))
 		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil menghapus bank : %s", bankId), map[string]any{})
 	}
 }

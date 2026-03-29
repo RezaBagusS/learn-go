@@ -13,7 +13,7 @@ import (
 type BankService interface {
 	FetchAllBanks() ([]models.Bank, error)
 	FetchBankByCode(bankCode string) (*models.Bank, error)
-	CreateNewBank(bank models.Bank) (models.Bank, error)
+	CreateNewBank(bank models.Bank) (*models.Bank, error)
 	PatchBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
 }
@@ -37,21 +37,18 @@ func (s *bankService) FetchBankByCode(bankCode string) (*models.Bank, error) {
 }
 
 // Create new bank
-func (s *bankService) CreateNewBank(bank models.Bank) (models.Bank, error) {
-	// Logika Bisnis: Validasi input tidak boleh kosong
-	if bank.BankCode == "" || bank.BankName == "" {
-		return models.Bank{}, fmt.Errorf("Field tidak boleh kosong!")
-	}
-
+func (s *bankService) CreateNewBank(bank models.Bank) (*models.Bank, error) {
 	// Simpan ke repository
-	newBank, err := s.repo.CreateBank(bank)
+	newId, err := s.repo.CreateBank(bank)
 	if err != nil {
-		return models.Bank{}, err
+		return nil, err
 	}
 
-	helper.PrintLog("bank", helper.LogPositionService, fmt.Sprintf("Berhasil menambahkan data bank : %s", newBank))
+	helper.PrintLog("bank", helper.LogPositionService, fmt.Sprintf("Berhasil menambahkan data bank : %s", newId))
 
-	return bank, nil
+	bank.ID = uuid.MustParse(newId)
+
+	return &bank, nil
 }
 
 // Update task
@@ -66,12 +63,5 @@ func (s *bankService) PatchBank(bank models.Bank) (string, error) {
 
 // Delete bank
 func (s *bankService) DeleteBank(bankId string) error {
-
-	_, err := uuid.Parse(bankId)
-	if err != nil {
-		// Jika gagal di-parse, kembalikan error validasi
-		return fmt.Errorf("format ID tidak valid: harus berupa UUID")
-	}
-
 	return s.repo.DeleteBank(bankId)
 }
