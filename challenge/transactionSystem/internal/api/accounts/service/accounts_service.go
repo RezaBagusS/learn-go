@@ -1,9 +1,9 @@
 package service
 
 import (
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/service"
-	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"log"
 
@@ -63,7 +63,7 @@ func (s *accountsService) CreateNewAccount(account models.Account) (*models.Acco
 	}
 
 	// Bank Checking ...
-	data, err := s.bankSvc.FetchBankByCode(account.BankCode)
+	data, err := s.bankSvc.FetchBankById(account.BankCode)
 
 	log.Println(data)
 

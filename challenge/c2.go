@@ -1,9 +1,13 @@
 package challenge
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"time"
 
 	"belajar-go/challenge/transactionSystem/config"
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/server"
 
 	"github.com/joho/godotenv"
@@ -11,21 +15,32 @@ import (
 
 func Challenge2() {
 
-	// Muat access environment
-	if err := godotenv.Load("challenge/transactionSystem/.env"); err != nil {
+	helper.InitLogger()
+	defer helper.Log.Sync()
+
+	if err := godotenv.Load(".env"); err != nil {
 		log.Fatalf("App Error loading .env file: %v", err)
 	}
 
-	// Inisialisasi Koneksi Database
 	db, err := config.ConnectDB()
 	if err != nil {
 		log.Fatalln("Error saat inisialisasi aplikasi:", err)
 	}
 
-	// Ini memastikan koneksi database baru akan ditutup HANYA KETIKA aplikasi server mati.
 	defer db.Close()
 
-	// 3. Jalankan server
-	svr := server.NewServer(db)
+	rdb := config.ConnectRedis()
+	defer rdb.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Fatal("Redis tidak merespon")
+	}
+
+	fmt.Println("Koneksi Database dan Redis berhasil!")
+
+	svr := server.NewServer(db, rdb)
 	svr.Run()
 }

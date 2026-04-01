@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"belajar-go/challenge/transactionSystem/internal/helper"
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"database/sql"
 	"errors"

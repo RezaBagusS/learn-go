@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"belajar-go/challenge/transactionSystem/internal/helper"
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"database/sql"
 	"errors"
@@ -16,7 +16,7 @@ import (
 
 type BankRepository interface {
 	GetAllBanks() ([]models.Bank, error)
-	GetBankByCode(bankCode string) (*models.Bank, error)
+	GetBankById(id string) (*models.Bank, error)
 	CreateBank(bank models.Bank) (string, error)
 	UpdateBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
@@ -48,19 +48,19 @@ func (r *bankRepository) GetAllBanks() ([]models.Bank, error) {
 	return banks, nil
 }
 
-// Get Bank by Bank Code
-func (r *bankRepository) GetBankByCode(bankCode string) (*models.Bank, error) {
+// Get Bank by Bank Id
+func (r *bankRepository) GetBankById(id string) (*models.Bank, error) {
 	var bank models.Bank
-	query := "SELECT id, bank_code, bank_name, created_at FROM banks WHERE bank_code = $1"
+	query := "SELECT id, bank_code, bank_name, created_at FROM banks WHERE id::text = $1 or bank_code =$1"
 
-	err := r.db.Get(&bank, query, bankCode)
+	err := r.db.Get(&bank, query, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			helper.PrintLog("bank", helper.LogPositionRepo, models.ErrIdNotFound.Error())
 			return nil, models.ErrIdNotFound
 		}
 
-		helper.PrintLog("bank", helper.LogPositionRepo, models.ErrDatabaseIssue.Error())
+		helper.PrintLog("bank", helper.LogPositionRepo, err.Error())
 		return nil, models.ErrDatabaseIssue // Error Wrapping
 	}
 
@@ -150,7 +150,7 @@ func (r *bankRepository) UpdateBank(bank models.Bank) (string, error) {
 		return "", models.ErrIdNotFound
 	}
 
-	return bank.ID.String(), nil
+	return bank.BankCode, nil
 }
 
 // Method Delete

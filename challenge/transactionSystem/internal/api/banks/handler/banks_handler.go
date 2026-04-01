@@ -1,31 +1,50 @@
 package handler
 
 import (
+	"belajar-go/challenge/transactionSystem/config"
 	"belajar-go/challenge/transactionSystem/dto"
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/service"
-	"belajar-go/challenge/transactionSystem/internal/helper"
+	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type BanksHandler struct {
-	mux *http.ServeMux
-	svc service.BankService
+	mux         *http.ServeMux
+	svc         service.BankService
+	rdb         *redis.Client
+	keyManager  *helper.RedisKeyManager
+	idempotency *middleware.IdempotencyMiddleware
 }
 
-func NewBanksHandler(mux *http.ServeMux, db *sqlx.DB) *BanksHandler {
+const (
+	REDIS_KEY_BANK_LIST = "bank_list"
+	REDIS_KEY_BANK_ID   = "bank_id"
+)
+
+func NewBanksHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *BanksHandler {
+
+	keyManager := helper.NewRedisKeyManager("transaction_system", "bank")
+	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
 	bankRepo := repository.NewBankRepository(db)
 	bankSvc := service.NewBanksService(bankRepo)
 
 	return &BanksHandler{
-		mux: mux,
-		svc: bankSvc,
+		mux:         mux,
+		svc:         bankSvc,
+		rdb:         rdb,
+		keyManager:  keyManager,
+		idempotency: idempotency,
 	}
 }
 
@@ -35,12 +54,16 @@ func (a *BanksHandler) MapRoutes() {
 		a.GetAll(),
 	)
 	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodGet, "/bank/{identifier}"),
+		a.GetById(),
+	)
+	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPost, "/bank"),
-		a.Create(),
+		a.idempotency.Check(a.Create()),
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPatch, "/bank/{id}"),
-		a.Update(),
+		a.idempotency.Check(a.Update()),
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodDelete, "/bank/{id}"),
@@ -48,19 +71,67 @@ func (a *BanksHandler) MapRoutes() {
 	)
 }
 
+func (h *BanksHandler) saveToCacheCompressed(ctx context.Context, key string, data any) {
+	jsonData, _ := json.Marshal(data)
+
+	compressed, err := helper.CompressData(jsonData)
+	if err != nil {
+		helper.PrintLog("redis", helper.LogPositionHandler, "Gagal kompresi: "+err.Error())
+		return
+	}
+
+	err = h.rdb.Set(ctx, key, compressed, config.TimeCache).Err()
+	if err != nil {
+		helper.PrintLog("redis", helper.LogPositionHandler, "Peringatan: Gagal menyimpan cache ke Redis: "+err.Error())
+	}
+}
+
 // GET /banks
 func (h *BanksHandler) GetAll() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		helper.PrintLog("bank", helper.LogPositionHandler, "Mengambil seluruh data bank ...")
+		ctx := r.Context()
+		cacheKey := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		val, errRedis := h.rdb.Get(ctx, cacheKey).Bytes()
+
+		helper.Log.Info("Mencari data bank",
+			zap.String("module", "bank"),
+			zap.String("position", string(helper.LogPositionHandler)),
+			// zap.String("identifier", idStr),
+		)
+
+		if errRedis == nil {
+			decompressed, err := helper.DecompressData(val)
+			if err == nil {
+				var banks []models.Bank
+				if err := json.Unmarshal(decompressed, &banks); err == nil {
+					helper.Log.Info("Cache Hit - Berhasil mengambil list data bank",
+						zap.String("module", "bank"),
+						zap.String("bank_name", string(helper.LogPositionHandler)),
+					)
+					dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data bank", map[string]any{"banks": banks})
+					return
+				}
+			}
+		}
 
 		banks, err := h.svc.FetchAllBanks()
 		if err != nil {
-			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			helper.Log.Error(err.Error(),
+				zap.String("module", "bank"),
+				zap.Error(err),
+			)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
+		h.saveToCacheCompressed(ctx, cacheKey, banks)
+
+		helper.Log.Info("Berhasil mengambil list data bank",
+			zap.String("module", "bank"),
+			zap.Int("count", len(banks)),
+			zap.Any("data", banks),
+		)
 		helper.PrintLog("bank", helper.LogPositionHandler, "Berhasil mengambil list data bank")
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data bank", map[string]any{
 			"banks": banks,
@@ -68,22 +139,42 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 	}
 }
 
-// GET /bank/{bankCode}
-func (h *BanksHandler) GetByCode() http.HandlerFunc {
+// GET /bank/{identifier}
+func (h *BanksHandler) GetById() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		codeStr := r.PathValue("bankCode")
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan kode bank = %s", codeStr))
+		idStr := r.PathValue("identifier")
+		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mencari bank dengan keyword: %s", idStr))
 
-		bank, err := h.svc.FetchBankByCode(codeStr)
+		ctx := r.Context()
+		cacheKey := h.keyManager.Generate(REDIS_KEY_BANK_ID + ":" + idStr)
+		val, errRedis := h.rdb.Get(ctx, cacheKey).Bytes()
+
+		if errRedis == nil {
+			decompressed, err := helper.DecompressData(val)
+			if err == nil {
+				var banks models.Bank
+				if err := json.Unmarshal(decompressed, &banks); err == nil {
+					helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Cache Hit - Berhasil mengambil data bank dengan code = %s", idStr))
+					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr), map[string]any{
+						"bank": banks,
+					})
+					return
+				}
+			}
+		}
+
+		bank, err := h.svc.FetchBankById(idStr)
 		if err != nil {
 			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", codeStr))
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", codeStr), map[string]any{
+		h.saveToCacheCompressed(ctx, cacheKey, bank)
+
+		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr))
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr), map[string]any{
 			"bank": bank,
 		})
 	}
@@ -93,17 +184,12 @@ func (h *BanksHandler) GetByCode() http.HandlerFunc {
 func (h *BanksHandler) Create() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		ctx := r.Context()
+
 		var payload models.Bank
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
-			return
-		}
-
-		// Logika Bisnis: Validasi input tidak boleh kosong
-		if payload.BankCode == "" || payload.BankName == "" {
-			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidField.Error())
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
 			return
 		}
 
@@ -114,6 +200,13 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
+		}
+
+		// Invalidate Existing Cache
+		cacheBankList := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		errDel := h.rdb.Del(ctx, cacheBankList).Err()
+		if errDel != nil {
+			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
 		}
 
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil membuat data bank baru : %+v", newBank))
@@ -127,6 +220,8 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 func (h *BanksHandler) Update() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		ctx := r.Context()
+
 		bankId := r.PathValue("id")
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan kode bank = %s", bankId))
 
@@ -134,13 +229,6 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
-			return
-		}
-
-		// Logika Bisnis: Validasi input tidak boleh kosong
-		if payload.BankCode == "" && payload.BankName == "" {
-			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidField.Error())
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
 			return
 		}
 
@@ -156,16 +244,24 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 
 		payload.ID = bankIdParse
 
-		returnId, err := h.svc.PatchBank(payload)
+		returnedId, err := h.svc.PatchBank(payload)
 		if err != nil {
 			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
+		// Invalidate Existing Cache
+		cacheBankList := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		cacheBankId := h.keyManager.Generate(REDIS_KEY_BANK_ID + ":" + returnedId)
+		errDel := h.rdb.Del(ctx, cacheBankList, cacheBankId).Err()
+		if errDel != nil {
+			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
+		}
+
 		helper.PrintLog("bank", helper.LogPositionHandler, "Berhasil mengupdate data bank")
-		dto.WriteResponse(w, http.StatusPartialContent, "Berhasil mengupdate data bank", map[string]any{
-			"id": returnId,
+		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data bank", map[string]any{
+			"id": returnedId,
 		})
 	}
 }
@@ -173,6 +269,8 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 // DELETE /bank/{id}
 func (h *BanksHandler) Delete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		ctx := r.Context()
 
 		bankId := r.PathValue("id")
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id bank = %s", bankId))
@@ -190,6 +288,14 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
+		}
+
+		// Invalidate Existing Cache
+		cacheBankList := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		cacheBankId := h.keyManager.Generate(REDIS_KEY_BANK_ID)
+		errDel := h.rdb.Del(ctx, cacheBankList, cacheBankId).Err()
+		if errDel != nil {
+			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
 		}
 
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil menghapus bank : %s", bankId))

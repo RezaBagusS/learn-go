@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "${DB_PORT}:5432"
+    networks:
+      - transaction_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    restart: always
+    ports:
+      - "${REDIS_PORT}:6379"
+    networks:
+      - transaction_net
+    # redis data:
+    volumes:
+      - redis_data:/data
+
+  app:
+    build: .
+    container_name: go_transaction_app
+    ports:
+      - "${APP_PORT}:8080"
+    depends_on:
+      - db
+      - redis
+    environment:
+      APP_ADDR: "0.0.0.0"
+      APP_PORT: ${APP_PORT}
+      DB_HOST: db
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: disable
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks:
+      - transaction_net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  transaction_net:
+    driver: bridge

@@ -30,7 +30,7 @@ import (
 func Day3() {
 
 	// Muat access environment
-	if err := godotenv.Load("projectAPI/.env"); err != nil {
+	if err := godotenv.Load(".env"); err != nil {
 		log.Fatalf("App Error loading .env file: %v", err)
 	}
 

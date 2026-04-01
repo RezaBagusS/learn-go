@@ -2,9 +2,9 @@ package handler
 
 import (
 	"belajar-go/challenge/transactionSystem/dto"
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/transactions/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/transactions/service"
-	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"encoding/json"
 	"fmt"
@@ -13,20 +13,23 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/redis/go-redis/v9"
 )
 
 type TransactionsHandler struct {
 	mux *http.ServeMux
 	svc service.TransactionService
+	rdb *redis.Client
 }
 
-func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB) *TransactionsHandler {
+func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *TransactionsHandler {
 	trxRepo := repository.NewtransactionRepository(db)
 	TrxSvc := service.NewTransactionsService(trxRepo)
 
 	return &TransactionsHandler{
 		mux: mux,
 		svc: TrxSvc,
+		rdb: rdb,
 	}
 }
 

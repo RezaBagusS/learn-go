@@ -2,11 +2,11 @@ package handler
 
 import (
 	"belajar-go/challenge/transactionSystem/dto"
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/service"
 	bankRepository "belajar-go/challenge/transactionSystem/internal/api/banks/repository"
 	bankService "belajar-go/challenge/transactionSystem/internal/api/banks/service"
-	"belajar-go/challenge/transactionSystem/internal/helper"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"encoding/json"
 	"fmt"
@@ -15,14 +15,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/redis/go-redis/v9"
 )
 
 type AccountsHandler struct {
 	mux *http.ServeMux
 	svc service.AccountsService
+	rdb *redis.Client
 }
 
-func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB) *AccountsHandler {
+func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *AccountsHandler {
 
 	bankRepo := bankRepository.NewBankRepository(db)
 	bankSvc := bankService.NewBanksService(bankRepo)
@@ -33,6 +35,7 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB) *AccountsHandler {
 	return &AccountsHandler{
 		mux: mux,
 		svc: accountSvc,
+		rdb: rdb,
 	}
 }
 

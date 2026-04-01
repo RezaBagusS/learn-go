@@ -11,17 +11,20 @@ import (
 	"os"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/redis/go-redis/v9"
 )
 
 type Server struct {
 	mux *http.ServeMux
 	db  *sqlx.DB
+	rdb *redis.Client
 }
 
-func NewServer(db *sqlx.DB) *Server {
+func NewServer(db *sqlx.DB, rdb *redis.Client) *Server {
 	s := &Server{
 		mux: http.NewServeMux(),
 		db:  db,
+		rdb: rdb,
 	}
 
 	s.registerRoutes()
@@ -31,15 +34,15 @@ func NewServer(db *sqlx.DB) *Server {
 func (s *Server) registerRoutes() {
 
 	// Account Domain =====
-	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db)
+	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db, s.rdb)
 	accHandler.MapRoutes()
 
 	// Bank Domain =====
-	bnkHandler := bankHandler.NewBanksHandler(s.mux, s.db)
+	bnkHandler := bankHandler.NewBanksHandler(s.mux, s.db, s.rdb)
 	bnkHandler.MapRoutes()
 
 	// Transaction Domain =====
-	trxHandler := transactionHandler.NewTransactionsHandler(s.mux, s.db)
+	trxHandler := transactionHandler.NewTransactionsHandler(s.mux, s.db, s.rdb)
 	trxHandler.MapRoutes()
 }
 
