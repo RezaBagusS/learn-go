@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -18,6 +20,7 @@ type Server struct {
 	mux *http.ServeMux
 	db  *sqlx.DB
 	rdb *redis.Client
+	obs *middleware.ObservabilityMiddleware
 }
 
 func NewServer(db *sqlx.DB, rdb *redis.Client) *Server {
@@ -25,6 +28,7 @@ func NewServer(db *sqlx.DB, rdb *redis.Client) *Server {
 		mux: http.NewServeMux(),
 		db:  db,
 		rdb: rdb,
+		obs: middleware.NewObservabilityMiddleware(),
 	}
 
 	s.registerRoutes()
@@ -39,11 +43,13 @@ func (s *Server) registerRoutes() {
 
 	// Bank Domain =====
 	bnkHandler := bankHandler.NewBanksHandler(s.mux, s.db, s.rdb)
-	bnkHandler.MapRoutes()
+	bnkHandler.MapRoutes(s.obs)
 
 	// Transaction Domain =====
 	trxHandler := transactionHandler.NewTransactionsHandler(s.mux, s.db, s.rdb)
 	trxHandler.MapRoutes()
+
+	s.mux.Handle("/metrics", promhttp.Handler())
 }
 
 func (s *Server) Run() {

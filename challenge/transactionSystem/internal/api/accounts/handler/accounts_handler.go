@@ -7,6 +7,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/service"
 	bankRepository "belajar-go/challenge/transactionSystem/internal/api/banks/repository"
 	bankService "belajar-go/challenge/transactionSystem/internal/api/banks/service"
+	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"encoding/json"
 	"fmt"
@@ -19,13 +20,23 @@ import (
 )
 
 type AccountsHandler struct {
-	mux *http.ServeMux
-	svc service.AccountsService
-	rdb *redis.Client
+	mux         *http.ServeMux
+	svc         service.AccountsService
+	rdb         *redis.Client
+	keyManager  *helper.RedisKeyManager
+	idempotency *middleware.IdempotencyMiddleware
 }
+
+const (
+	REDIS_KEY_ACCOUNT_LIST        = "account_list"
+	REDIS_KEY_ACCOUNT_ID          = "account_id"
+	REDIS_KEY_ACCOUNT_TRANSACTION = "account_transaction"
+)
 
 func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *AccountsHandler {
 
+	keyManager := helper.NewRedisKeyManager("transaction_system", "bank")
+	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
 	bankRepo := bankRepository.NewBankRepository(db)
 	bankSvc := bankService.NewBanksService(bankRepo)
 
@@ -33,9 +44,11 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *Acc
 	accountSvc := service.NewAccountsService(accountRepo, bankSvc)
 
 	return &AccountsHandler{
-		mux: mux,
-		svc: accountSvc,
-		rdb: rdb,
+		mux:         mux,
+		svc:         accountSvc,
+		rdb:         rdb,
+		keyManager:  keyManager,
+		idempotency: idempotency,
 	}
 }
 

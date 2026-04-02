@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"time"
 
@@ -20,5 +21,8 @@ func ConnectRedis() *redis.Client {
 		Password: os.Getenv("REDIS_PASSWORD"),
 		DB:       0,
 	})
+	log.Println(os.Getenv("REDIS_HOST"))
+	log.Println(os.Getenv("REDIS_PORT"))
+	log.Println(os.Getenv("REDIS_PASSWORD"))
 	return rdb
 }

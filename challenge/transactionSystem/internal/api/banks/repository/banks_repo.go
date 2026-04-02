@@ -2,7 +2,9 @@ package repository
 
 import (
 	"belajar-go/challenge/transactionSystem/helper"
+	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,10 +14,13 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.uber.org/zap"
 )
 
 type BankRepository interface {
-	GetAllBanks() ([]models.Bank, error)
+	GetAllBanks(ctx context.Context) ([]models.Bank, error)
 	GetBankById(id string) (*models.Bank, error)
 	CreateBank(bank models.Bank) (string, error)
 	UpdateBank(bank models.Bank) (string, error)
@@ -31,19 +36,43 @@ func NewBankRepository(db *sqlx.DB) BankRepository {
 }
 
 // Get All
-func (r *bankRepository) GetAllBanks() ([]models.Bank, error) {
-	var banks []models.Bank
+func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error) {
+
+	tracer := middleware.TracerFromCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankRepo.GetAll")
+	defer span.End()
+
+	logger := middleware.LoggerFromCtx(ctx)
+
 	query := "SELECT id, bank_code, bank_name, created_at FROM banks ORDER BY created_at desc"
 
-	err := r.db.Select(&banks, query)
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "banks"),
+	)
+
+	logger.Info("executing query",
+		zap.String("query", "SELECT banks"),
+	)
+
+	var banks []models.Bank
+
+	err := r.db.SelectContext(ctx, &banks, query)
 	if err != nil {
-		helper.PrintLog("bank", helper.LogPositionRepo, err.Error())
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+
+		logger.Error("query failed", zap.Error(err))
+
 		return nil, models.ErrDatabaseIssue
 	}
 
-	if banks == nil {
-		banks = []models.Bank{}
-	}
+	span.SetAttributes(attribute.Int("db.result.count", len(banks)))
+
+	logger.Info("query success",
+		zap.Int("rows", len(banks)),
+	)
 
 	return banks, nil
 }

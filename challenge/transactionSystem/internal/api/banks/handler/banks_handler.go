@@ -1,21 +1,22 @@
 package handler
 
 import (
-	"belajar-go/challenge/transactionSystem/config"
 	"belajar-go/challenge/transactionSystem/dto"
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/service"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
-	"context"
+	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -27,11 +28,13 @@ type BanksHandler struct {
 	idempotency *middleware.IdempotencyMiddleware
 }
 
+// Redis Variabel Key
 const (
 	REDIS_KEY_BANK_LIST = "bank_list"
 	REDIS_KEY_BANK_ID   = "bank_id"
 )
 
+// Bank handler init
 func NewBanksHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *BanksHandler {
 
 	keyManager := helper.NewRedisKeyManager("transaction_system", "bank")
@@ -48,91 +51,103 @@ func NewBanksHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *BanksH
 	}
 }
 
-func (a *BanksHandler) MapRoutes() {
+// Map route
+func (a *BanksHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
+
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/banks"),
-		a.GetAll(),
+		obs.Wrap("BankHandler.GetAll", "bank", a.GetAll()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/bank/{identifier}"),
-		a.GetById(),
+		obs.Wrap("BankHandler.GetById", "bank", a.GetById()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPost, "/bank"),
-		a.idempotency.Check(a.Create()),
+		obs.Wrap("BankHandler.Create", "bank", a.idempotency.Check(a.Create())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPatch, "/bank/{id}"),
-		a.idempotency.Check(a.Update()),
+		obs.Wrap("BankHandler.Patch", "bank", a.idempotency.Check(a.Update())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodDelete, "/bank/{id}"),
-		a.Delete(),
+		obs.Wrap("BankHandler.Delete", "bank", a.Delete()).ServeHTTP,
 	)
-}
-
-func (h *BanksHandler) saveToCacheCompressed(ctx context.Context, key string, data any) {
-	jsonData, _ := json.Marshal(data)
-
-	compressed, err := helper.CompressData(jsonData)
-	if err != nil {
-		helper.PrintLog("redis", helper.LogPositionHandler, "Gagal kompresi: "+err.Error())
-		return
-	}
-
-	err = h.rdb.Set(ctx, key, compressed, config.TimeCache).Err()
-	if err != nil {
-		helper.PrintLog("redis", helper.LogPositionHandler, "Peringatan: Gagal menyimpan cache ke Redis: "+err.Error())
-	}
 }
 
 // GET /banks
 func (h *BanksHandler) GetAll() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		cacheStart := time.Now()
 		ctx := r.Context()
-		cacheKey := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
-		val, errRedis := h.rdb.Get(ctx, cacheKey).Bytes()
+		span, logger, tracer := middleware.AllCtx(ctx)
 
-		helper.Log.Info("Mencari data bank",
-			zap.String("module", "bank"),
-			zap.String("position", string(helper.LogPositionHandler)),
-			// zap.String("identifier", idStr),
-		)
+		cacheKey := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		logger.Info("Checking cache", zap.String("key", cacheKey))
+
+		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
+
+		val, errRedis := h.rdb.Get(cacheCtx, cacheKey).Bytes()
+		cacheDuration := time.Since(cacheStart).Seconds()
+
+		metrics.CacheDuration.WithLabelValues(
+			"get",
+			"bank_list",
+		).Observe(cacheDuration)
+
+		cacheSpan.End()
 
 		if errRedis == nil {
+
+			metrics.CacheRequestsTotal.WithLabelValues(
+				"bank_list",
+				"hit",
+			).Inc()
+
 			decompressed, err := helper.DecompressData(val)
 			if err == nil {
 				var banks []models.Bank
 				if err := json.Unmarshal(decompressed, &banks); err == nil {
-					helper.Log.Info("Cache Hit - Berhasil mengambil list data bank",
-						zap.String("module", "bank"),
-						zap.String("bank_name", string(helper.LogPositionHandler)),
+					span.AddEvent("Cache hit occurred")
+					logger.Info("Cache Hit - Berhasil mengambil list data bank",
+						zap.String("source", "redis"),
+						zap.Int("count", len(banks)),
 					)
 					dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data bank", map[string]any{"banks": banks})
 					return
 				}
 			}
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(
+				"bank_list",
+				"miss",
+			).Inc()
 		}
 
-		banks, err := h.svc.FetchAllBanks()
+		span.AddEvent("Cache miss")
+		logger.Info("Cache miss", zap.String("key", cacheKey))
+
+		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
+		banks, err := h.svc.FetchAllBanks(dbCtx)
+		dbSpan.End()
+
 		if err != nil {
-			helper.Log.Error(err.Error(),
-				zap.String("module", "bank"),
-				zap.Error(err),
-			)
+			logger.Error("Database fetch failed", zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		h.saveToCacheCompressed(ctx, cacheKey, banks)
+		span.SetAttributes(attribute.Int("result.count", len(banks)))
+		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, banks)
 
-		helper.Log.Info("Berhasil mengambil list data bank",
-			zap.String("module", "bank"),
+		logger.Info("Berhasil mengambil list data bank",
+			zap.String("source", "database"),
 			zap.Int("count", len(banks)),
-			zap.Any("data", banks),
 		)
-		helper.PrintLog("bank", helper.LogPositionHandler, "Berhasil mengambil list data bank")
+
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data bank", map[string]any{
 			"banks": banks,
 		})
@@ -171,7 +186,7 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 			return
 		}
 
-		h.saveToCacheCompressed(ctx, cacheKey, bank)
+		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, bank)
 
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr))
 		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr), map[string]any{

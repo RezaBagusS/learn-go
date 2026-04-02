@@ -3,15 +3,19 @@ package service
 import (
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/repository"
+	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"context"
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.uber.org/zap"
 	// "errors"
 )
 
 type BankService interface {
-	FetchAllBanks() ([]models.Bank, error)
+	FetchAllBanks(ctx context.Context) ([]models.Bank, error)
 	FetchBankById(id string) (*models.Bank, error)
 	CreateNewBank(bank models.Bank) (*models.Bank, error)
 	PatchBank(bank models.Bank) (string, error)
@@ -27,8 +31,31 @@ func NewBanksService(repo repository.BankRepository) BankService {
 }
 
 // Fetch All Data
-func (s *bankService) FetchAllBanks() ([]models.Bank, error) {
-	return s.repo.GetAllBanks()
+func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) {
+	tracer := middleware.TracerFromCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankService.GetAll")
+	defer span.End()
+
+	logger := middleware.LoggerFromCtx(ctx)
+
+	logger.Info("fetching banks from repository")
+
+	banks, err := s.repo.GetAllBanks(ctx)
+	if err != nil {
+		span.RecordError(err)
+		logger.Error("failed fetching banks", zap.Error(err))
+		return nil, err
+	}
+
+	span.SetAttributes(
+		attribute.Int("service.result.count", len(banks)),
+	)
+
+	logger.Info("success fetching banks",
+		zap.Int("count", len(banks)),
+	)
+
+	return banks, nil
 }
 
 // Fetch Bank by code
