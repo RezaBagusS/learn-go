@@ -1,7 +1,6 @@
 package service
 
 import (
-	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/repository"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
@@ -17,7 +16,7 @@ type BankService interface {
 	FetchAllBanks(ctx context.Context) ([]models.Bank, error)
 	FetchBankById(ctx context.Context, id string) (*models.Bank, error)
 	CreateNewBank(ctx context.Context, bank models.Bank) (*models.Bank, error)
-	PatchBank(bank models.Bank) (string, error)
+	PatchBank(ctx context.Context, bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
 }
 
@@ -123,18 +122,37 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 }
 
 // Update task
-func (s *bankService) PatchBank(bank models.Bank) (string, error) {
+func (s *bankService) PatchBank(ctx context.Context, bank models.Bank) (string, error) {
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankService.Update")
+	defer span.End()
+
+	logger.Info("checking payload")
 
 	// Logika Bisnis: Validasi input tidak boleh kosong
-	if bank.BankCode == "" && bank.BankName == "" {
-		helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidField.Error())
+	if bank.BankCode == "" || bank.BankName == "" {
+		span.RecordError(models.ErrInvalidField)
+		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		return "", models.ErrInvalidField
 	}
 
-	bankCode, err := s.repo.UpdateBank(bank)
+	logger.Info("updating bank data")
+
+	bankCode, err := s.repo.UpdateBank(ctx, bank)
 	if err != nil {
+		span.RecordError(err)
+		logger.Error(err.Error(), zap.Error(err))
 		return "", err
 	}
+
+	span.SetAttributes(
+		attribute.String("service.result.bankCode", bankCode),
+	)
+
+	logger.Info("success updating bank data",
+		zap.String("service.result.bankCode", bankCode),
+	)
 
 	return bankCode, nil
 }

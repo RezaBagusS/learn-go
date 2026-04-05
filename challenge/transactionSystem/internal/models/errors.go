@@ -32,6 +32,8 @@ var (
 	ErrLogicBalanceTrx  = errors.New("Saldo rekening tidak mencukupi")
 	ErrLogicMutationTrx = errors.New("Gagal melakukan mutasi transaksi")
 	ErrLogicCommitTrx   = errors.New("Gagal melakukan commit transaksi")
+
+	ErrRedisInvalidate = errors.New("Gagal menghapus cache redis")
 )
 
 func StatusCodeHandler(err error) int {

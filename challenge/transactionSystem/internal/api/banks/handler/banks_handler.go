@@ -135,8 +135,11 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 			return
 		}
 
+		cacheSetStart := time.Now()
 		span.SetAttributes(attribute.Int("result.count", len(banks)))
 		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, banks)
+		metrics.CacheDuration.WithLabelValues("set", "bank_list").
+			Observe(time.Since(cacheSetStart).Seconds())
 
 		logger.Info("Berhasil mengambil list data bank",
 			zap.String("source", "database"),
@@ -153,10 +156,12 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 func (h *BanksHandler) GetById() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		idStr := r.PathValue("identifier")
 		cacheStart := time.Now()
 		ctx := r.Context()
 		span, logger, tracer := middleware.AllCtx(ctx)
+
+		idStr := r.PathValue("identifier")
+		logger.Info("Path received", zap.String("handler.query", idStr))
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + idStr)
 		logger.Info("Checking cache",
@@ -181,7 +186,7 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 		if errRedis == nil {
 
 			metrics.CacheRequestsTotal.WithLabelValues(
-				"account_id",
+				"bank_id",
 				"hit",
 			).Inc()
 
@@ -202,7 +207,7 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 			}
 		} else {
 			metrics.CacheRequestsTotal.WithLabelValues(
-				"account_id",
+				"bank_id",
 				"miss",
 			).Inc()
 		}
@@ -221,8 +226,11 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 			return
 		}
 
+		cacheSetStart := time.Now()
 		span.SetAttributes(attribute.String("handler.result.id", bank.ID.String()))
 		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, bank)
+		metrics.CacheDuration.WithLabelValues("set", "bank_id").
+			Observe(time.Since(cacheSetStart).Seconds())
 
 		logger.Info("Berhasil mengambil data bank",
 			zap.String("source", "database"),
@@ -265,13 +273,21 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 
 		// Invalidate Existing Cache
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
+		cacheStart := time.Now()
 		if err := h.rdb.Del(ctx, cacheKey).Err(); err != nil {
-			logger.Error("Failed to invalidate cache", zap.Error(err))
+			metrics.CacheRequestsTotal.WithLabelValues("bank_list", "error").Inc()
+			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
 		} else {
+			metrics.CacheRequestsTotal.WithLabelValues("bank_list", "invalidate").Inc()
 			span.AddEvent("Cache Invalidated")
 		}
+		metrics.CacheDuration.WithLabelValues("set", "bank_list").
+			Observe(time.Since(cacheStart).Seconds())
+
+		span.SetAttributes(attribute.String("handler.result.id", newBank.ID.String()))
 
 		logger.Info("Berhasil membuat data bank baru",
+			zap.String("source", "database"),
 			zap.Any("bank", newBank),
 		)
 
@@ -286,47 +302,67 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
 
 		bankId := r.PathValue("id")
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan kode bank = %s", bankId))
+		logger.Info("Path received", zap.String("handler.query", bankId))
 
 		var payload models.Bank
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
+			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
+		logger.Info("Payload received", zap.Any("payload", payload))
 
 		bankIdParse, err := uuid.Parse(bankId)
 		if err != nil {
 			// Jika gagal di-parse, kembalikan error validasi
-			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
+			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
 		payload.ID = bankIdParse
 
-		returnedId, err := h.svc.PatchBank(payload)
+		dbCtx, dbSpan := tracer.Start(ctx, "Update-Bank")
+		bankCode, err := h.svc.PatchBank(dbCtx, payload)
+		dbSpan.End()
+
 		if err != nil {
-			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
 		// Invalidate Existing Cache
-		cacheBankList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
-		cacheBankId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + returnedId)
-		errDel := h.rdb.Del(ctx, cacheBankList, cacheBankId).Err()
-		if errDel != nil {
-			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
-		}
+		cacheKeyList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
+		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + bankCode)
 
-		helper.PrintLog("bank", helper.LogPositionHandler, "Berhasil mengupdate data bank")
+		cacheStart := time.Now()
+		if err := h.rdb.Del(ctx, cacheKeyList, cacheKeyId).Err(); err != nil {
+			metrics.CacheRequestsTotal.WithLabelValues("bank_list", "error").Inc()
+			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues("bank_list", "invalidate").Inc()
+			span.AddEvent("Cache Invalidated")
+		}
+		metrics.CacheDuration.WithLabelValues("set", "bank_list").
+			Observe(time.Since(cacheStart).Seconds())
+
+		span.SetAttributes(attribute.String("handler.result.bankCode", bankCode))
+
+		logger.Info("Berhasil memperbarui data bank",
+			zap.String("source", "database"),
+			zap.String("handler.result.bankCode", bankCode),
+		)
+
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data bank", map[string]any{
-			"id": returnedId,
+			"bank_code": bankCode,
 		})
 	}
 }

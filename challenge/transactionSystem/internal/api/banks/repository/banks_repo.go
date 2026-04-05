@@ -23,7 +23,7 @@ type BankRepository interface {
 	GetAllBanks(ctx context.Context) ([]models.Bank, error)
 	GetBankById(ctx context.Context, id string) (*models.Bank, error)
 	CreateBank(ctx context.Context, bank models.Bank) (string, error)
-	UpdateBank(bank models.Bank) (string, error)
+	UpdateBank(ctx context.Context, bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
 }
 
@@ -173,10 +173,20 @@ func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (stri
 }
 
 // Method Update
-func (r *bankRepository) UpdateBank(bank models.Bank) (string, error) {
+func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (string, error) {
 	fields := []string{}
 	args := []any{}
 	idx := 1
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankRepo.Create")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "banks"),
+	)
 
 	// Cek BankCode
 	if bank.BankCode != "" {
@@ -201,35 +211,47 @@ func (r *bankRepository) UpdateBank(bank models.Bank) (string, error) {
 	)
 
 	// Query Execution
-	fmt.Printf("Query [bank][repo]: %v \n", query)
-	fmt.Printf("Args [bank][repo]: %v \n", args)
+	logger.Info("executing query",
+		zap.String("query", "UPDATE banks"),
+	)
 
-	result, err := r.db.Exec(query, args...)
+	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
+
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				helper.PrintLog("account", helper.LogPositionRepo, models.ErrDuplicateBank.Error())
+				logger.Error(models.ErrDuplicateBank.Error(), zap.Error(err))
 				return "", models.ErrDuplicateBank
 			}
 		}
 
-		helper.PrintLog("bank", helper.LogPositionRepo, err.Error())
+		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
 
 	// Cek apakah data dengan ID tersebut ditemukan
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		helper.PrintLog("bank", helper.LogPositionRepo, err.Error())
+		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return "", models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		helper.PrintLog("bank", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+		logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
 		return "", models.ErrIdNotFound
 	}
+
+	span.SetAttributes(
+		attribute.String("db.result.bankCode", bank.BankCode),
+	)
+
+	logger.Info("query success",
+		zap.String("db.result.bankCode", bank.BankCode),
+	)
 
 	return bank.BankCode, nil
 }
