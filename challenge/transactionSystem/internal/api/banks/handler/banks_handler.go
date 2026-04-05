@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"belajar-go/challenge/transactionSystem/config"
 	"belajar-go/challenge/transactionSystem/dto"
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/repository"
@@ -28,12 +29,6 @@ type BanksHandler struct {
 	idempotency *middleware.IdempotencyMiddleware
 }
 
-// Redis Variabel Key
-const (
-	REDIS_KEY_BANK_LIST = "bank_list"
-	REDIS_KEY_BANK_ID   = "bank_id"
-)
-
 // Bank handler init
 func NewBanksHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *BanksHandler {
 
@@ -56,23 +51,23 @@ func (a *BanksHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
 
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/banks"),
-		obs.Wrap("BankHandler.GetAll", "bank", a.GetAll()).ServeHTTP,
+		obs.Wrap("BankHandler.GetAll", config.DOMAIN_BANK, a.GetAll()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/bank/{identifier}"),
-		obs.Wrap("BankHandler.GetById", "bank", a.GetById()).ServeHTTP,
+		obs.Wrap("BankHandler.GetById", config.DOMAIN_BANK, a.GetById()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPost, "/bank"),
-		obs.Wrap("BankHandler.Create", "bank", a.idempotency.Check(a.Create())).ServeHTTP,
+		obs.Wrap("BankHandler.Create", config.DOMAIN_BANK, a.idempotency.Check(a.Create())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPatch, "/bank/{id}"),
-		obs.Wrap("BankHandler.Patch", "bank", a.idempotency.Check(a.Update())).ServeHTTP,
+		obs.Wrap("BankHandler.Patch", config.DOMAIN_BANK, a.idempotency.Check(a.Update())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodDelete, "/bank/{id}"),
-		obs.Wrap("BankHandler.Delete", "bank", a.Delete()).ServeHTTP,
+		obs.Wrap("BankHandler.Delete", config.DOMAIN_BANK, a.Delete()).ServeHTTP,
 	)
 }
 
@@ -84,7 +79,7 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 		ctx := r.Context()
 		span, logger, tracer := middleware.AllCtx(ctx)
 
-		cacheKey := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
 		logger.Info("Checking cache", zap.String("key", cacheKey))
 
 		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
@@ -159,37 +154,82 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		idStr := r.PathValue("identifier")
+		cacheStart := time.Now()
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
+
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + idStr)
+		logger.Info("Checking cache",
+			zap.String("key", cacheKey),
+			zap.String("handler.query", idStr),
+		)
+
+		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
+
+		val, errRedis := h.rdb.Get(cacheCtx, cacheKey).Bytes()
+		cacheDuration := time.Since(cacheStart).Seconds()
+
+		metrics.CacheDuration.WithLabelValues(
+			"get",
+			"bank_id",
+		).Observe(cacheDuration)
+
 		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Mencari bank dengan keyword: %s", idStr))
 
-		ctx := r.Context()
-		cacheKey := h.keyManager.Generate(REDIS_KEY_BANK_ID + ":" + idStr)
-		val, errRedis := h.rdb.Get(ctx, cacheKey).Bytes()
+		cacheSpan.End()
 
 		if errRedis == nil {
+
+			metrics.CacheRequestsTotal.WithLabelValues(
+				"account_id",
+				"hit",
+			).Inc()
+
 			decompressed, err := helper.DecompressData(val)
 			if err == nil {
-				var banks models.Bank
-				if err := json.Unmarshal(decompressed, &banks); err == nil {
-					helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Cache Hit - Berhasil mengambil data bank dengan code = %s", idStr))
-					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr), map[string]any{
-						"bank": banks,
+				var bank models.Bank
+				if err := json.Unmarshal(decompressed, &bank); err == nil {
+					span.AddEvent("Cache hit occurred")
+					logger.Info("Cache Hit - Berhasil mengambil data bank",
+						zap.String("source", "redis"),
+						zap.String("handler.result.id", bank.ID.String()),
+					)
+					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan identifier = %s", idStr), map[string]any{
+						"bank": bank,
 					})
 					return
 				}
 			}
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(
+				"account_id",
+				"miss",
+			).Inc()
 		}
 
-		bank, err := h.svc.FetchBankById(idStr)
+		span.AddEvent("Cache miss")
+		logger.Info("Cache miss", zap.String("key", cacheKey))
+
+		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
+		bank, err := h.svc.FetchBankById(dbCtx, idStr)
+		dbSpan.End()
+
 		if err != nil {
-			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			logger.Error("Database fetch failed", zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
+		span.SetAttributes(attribute.String("handler.result.id", bank.ID.String()))
 		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, bank)
 
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr))
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan code = %s", idStr), map[string]any{
+		logger.Info("Berhasil mengambil data bank",
+			zap.String("source", "database"),
+			zap.String("handler.result.id", bank.ID.String()),
+		)
+
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan identifier = %s", idStr), map[string]any{
 			"bank": bank,
 		})
 	}
@@ -218,7 +258,7 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 		}
 
 		// Invalidate Existing Cache
-		cacheBankList := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
+		cacheBankList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
 		errDel := h.rdb.Del(ctx, cacheBankList).Err()
 		if errDel != nil {
 			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
@@ -267,8 +307,8 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 		}
 
 		// Invalidate Existing Cache
-		cacheBankList := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
-		cacheBankId := h.keyManager.Generate(REDIS_KEY_BANK_ID + ":" + returnedId)
+		cacheBankList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
+		cacheBankId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + returnedId)
 		errDel := h.rdb.Del(ctx, cacheBankList, cacheBankId).Err()
 		if errDel != nil {
 			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
@@ -306,8 +346,8 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 		}
 
 		// Invalidate Existing Cache
-		cacheBankList := h.keyManager.Generate(REDIS_KEY_BANK_LIST)
-		cacheBankId := h.keyManager.Generate(REDIS_KEY_BANK_ID)
+		cacheBankList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
+		cacheBankId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID)
 		errDel := h.rdb.Del(ctx, cacheBankList, cacheBankId).Err()
 		if errDel != nil {
 			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())

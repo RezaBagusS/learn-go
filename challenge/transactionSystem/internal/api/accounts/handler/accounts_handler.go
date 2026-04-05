@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"belajar-go/challenge/transactionSystem/config"
 	"belajar-go/challenge/transactionSystem/dto"
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
@@ -9,14 +10,18 @@ import (
 	bankService "belajar-go/challenge/transactionSystem/internal/api/banks/service"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
+	"go.uber.org/zap"
 )
 
 type AccountsHandler struct {
@@ -26,12 +31,6 @@ type AccountsHandler struct {
 	keyManager  *helper.RedisKeyManager
 	idempotency *middleware.IdempotencyMiddleware
 }
-
-const (
-	REDIS_KEY_ACCOUNT_LIST        = "account_list"
-	REDIS_KEY_ACCOUNT_ID          = "account_id"
-	REDIS_KEY_ACCOUNT_TRANSACTION = "account_transaction"
-)
 
 func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *AccountsHandler {
 
@@ -52,30 +51,30 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *Acc
 	}
 }
 
-func (a *AccountsHandler) MapRoutes() {
+func (a *AccountsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/accounts"),
-		a.GetAll(),
+		obs.Wrap("AccountHandler.GetAll", config.DOMAIN_ACCOUNT, a.GetAll()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/account/{id}"),
-		a.GetById(),
+		obs.Wrap("AccountHandler.GetById", config.DOMAIN_ACCOUNT, a.GetById()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, "/account/{id}/transactions"),
-		a.GetTransactions(),
+		obs.Wrap("AccountHandler.GetTrx", config.DOMAIN_ACCOUNT, a.GetTransactions()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPost, "/account"),
-		a.Create(),
+		obs.Wrap("AccountHandler.Create", config.DOMAIN_ACCOUNT, a.idempotency.Check(a.Create())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPatch, "/account/{id}"),
-		a.Update(),
+		obs.Wrap("AccountHandler.Update", config.DOMAIN_ACCOUNT, a.idempotency.Check(a.Update())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodDelete, "/account/{id}"),
-		a.Delete(),
+		obs.Wrap("AccountHandler.Delete", config.DOMAIN_ACCOUNT, a.Delete()).ServeHTTP,
 	)
 }
 
@@ -83,16 +82,76 @@ func (a *AccountsHandler) MapRoutes() {
 func (h *AccountsHandler) GetAll() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		helper.PrintLog("account", helper.LogPositionHandler, "Mengambil seluruh data account ...")
+		cacheStart := time.Now()
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
 
-		accounts, err := h.svc.FetchAllAccounts()
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
+		logger.Info("Checking cache", zap.String("key", cacheKey))
+
+		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
+
+		val, errRedis := h.rdb.Get(cacheCtx, cacheKey).Bytes()
+		cacheDuration := time.Since(cacheStart).Seconds()
+
+		metrics.CacheDuration.WithLabelValues(
+			"get",
+			"account_list",
+		).Observe(cacheDuration)
+
+		cacheSpan.End()
+
+		if errRedis == nil {
+
+			metrics.CacheRequestsTotal.WithLabelValues(
+				"account_list",
+				"hit",
+			).Inc()
+
+			decompressed, err := helper.DecompressData(val)
+			if err == nil {
+				var accounts []models.Account
+				if err := json.Unmarshal(decompressed, &accounts); err == nil {
+					span.AddEvent("Cache hit occured")
+					logger.Info("Cache Hit - Berhasil mengambil list data account",
+						zap.String("source", "Redis"),
+						zap.Int("count", len(accounts)),
+					)
+					dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data account", map[string]any{
+						"accounts": accounts,
+					})
+					return
+				}
+			}
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(
+				"account_list",
+				"miss",
+			).Inc()
+		}
+
+		span.AddEvent("Cache miss")
+		logger.Info("Cache miss", zap.String("key", cacheKey))
+
+		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-database")
+		accounts, err := h.svc.FetchAllAccounts(dbCtx)
+		dbSpan.End()
+
 		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
+			logger.Error("Database fetch failed", zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		helper.PrintLog("account", helper.LogPositionHandler, "Berhasil mengambil list data akun")
+		span.SetAttributes(attribute.Int("result.count", len(accounts)))
+		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, accounts)
+
+		logger.Info("Berhasil mengambil list data akun",
+			zap.String("source", "database"),
+			zap.Int("count", len(accounts)),
+		)
+
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data akun", map[string]any{
 			"accounts": accounts,
 		})

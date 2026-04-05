@@ -2,7 +2,9 @@ package repository
 
 import (
 	"belajar-go/challenge/transactionSystem/helper"
+	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,10 +15,13 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.uber.org/zap"
 )
 
 type AccountRepository interface {
-	GetAllAccounts() ([]models.Account, error)
+	GetAllAccounts(ctx context.Context) ([]models.Account, error)
 	GetAccountById(id string) (*models.Account, error)
 	GetTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error)
 	CreateAccount(account models.Account) (string, error)
@@ -33,19 +38,44 @@ func NewAccountRepository(db *sqlx.DB) AccountRepository {
 }
 
 // Get All
-func (r *accountRepository) GetAllAccounts() ([]models.Account, error) {
-	var accounts []models.Account
+func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Account, error) {
+
+	tracer := middleware.TracerFromCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.GetAll")
+	defer span.End()
+
+	logger := middleware.LoggerFromCtx(ctx)
+
 	query := `SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at 
 	FROM accounts ORDER BY updated_at desc`
 
-	err := r.db.Select(&accounts, query)
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "accounts"),
+	)
+
+	logger.Info("executing query",
+		zap.String("query", "SELECT accounts"),
+	)
+
+	var accounts []models.Account
+
+	err := r.db.SelectContext(ctx, &accounts, query)
 	if err != nil {
-		return nil, models.ErrDatabaseIssue // Error Wrapping
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+
+		logger.Error("query Failed", zap.Error(err))
+
+		return nil, models.ErrDatabaseIssue
 	}
 
-	if accounts == nil {
-		accounts = []models.Account{}
-	}
+	span.SetAttributes(attribute.Int("db.result.count", len(accounts)))
+
+	logger.Info("query success",
+		zap.Int("rows", len(accounts)),
+	)
 
 	return accounts, nil
 }

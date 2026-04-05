@@ -39,7 +39,7 @@ func (s *Server) registerRoutes() {
 
 	// Account Domain =====
 	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db, s.rdb)
-	accHandler.MapRoutes()
+	accHandler.MapRoutes(s.obs)
 
 	// Bank Domain =====
 	bnkHandler := bankHandler.NewBanksHandler(s.mux, s.db, s.rdb)

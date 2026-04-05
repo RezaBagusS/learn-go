@@ -21,7 +21,7 @@ import (
 
 type BankRepository interface {
 	GetAllBanks(ctx context.Context) ([]models.Bank, error)
-	GetBankById(id string) (*models.Bank, error)
+	GetBankById(ctx context.Context, id string) (*models.Bank, error)
 	CreateBank(bank models.Bank) (string, error)
 	UpdateBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
@@ -38,11 +38,9 @@ func NewBankRepository(db *sqlx.DB) BankRepository {
 // Get All
 func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error) {
 
-	tracer := middleware.TracerFromCtx(ctx)
+	_, logger, tracer := middleware.AllCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.GetAll")
 	defer span.End()
-
-	logger := middleware.LoggerFromCtx(ctx)
 
 	query := "SELECT id, bank_code, bank_name, created_at FROM banks ORDER BY created_at desc"
 
@@ -78,20 +76,49 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 }
 
 // Get Bank by Bank Id
-func (r *bankRepository) GetBankById(id string) (*models.Bank, error) {
-	var bank models.Bank
+func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Bank, error) {
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankRepo.GetById")
+	defer span.End()
+
 	query := "SELECT id, bank_code, bank_name, created_at FROM banks WHERE id::text = $1 or bank_code =$1"
 
-	err := r.db.Get(&bank, query, id)
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "banks"),
+	)
+
+	logger.Info("executing query",
+		zap.String("query", "SELECT banks"),
+	)
+
+	var bank models.Bank
+
+	err := r.db.GetContext(ctx, &bank, query, id)
 	if err != nil {
+
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+
 		if errors.Is(err, sql.ErrNoRows) {
-			helper.PrintLog("bank", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+			logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
 			return nil, models.ErrIdNotFound
 		}
 
-		helper.PrintLog("bank", helper.LogPositionRepo, err.Error())
-		return nil, models.ErrDatabaseIssue // Error Wrapping
+		logger.Error("query failed", zap.Error(err))
+
+		return nil, models.ErrDatabaseIssue
 	}
+
+	span.SetAttributes(
+		attribute.String("db.result.id", bank.ID.String()),
+	)
+
+	logger.Info("query success",
+		zap.String("db.result.id", bank.ID.String()),
+	)
 
 	return &bank, nil
 }

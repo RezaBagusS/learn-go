@@ -4,14 +4,18 @@ import (
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/service"
+	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"context"
 	"log"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.uber.org/zap"
 )
 
 type AccountsService interface {
-	FetchAllAccounts() ([]models.Account, error)
+	FetchAllAccounts(ctx context.Context) ([]models.Account, error)
 	FetchAccountById(id string) (*models.Account, error)
 	FetchTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error)
 	CreateNewAccount(account models.Account) (*models.Account, error)
@@ -32,8 +36,31 @@ func NewAccountsService(repo repository.AccountRepository, bankSvc service.BankS
 }
 
 // Fetch All Data
-func (s *accountsService) FetchAllAccounts() ([]models.Account, error) {
-	return s.repo.GetAllAccounts()
+func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Account, error) {
+	tracer := middleware.TracerFromCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountService.GetAll")
+	defer span.End()
+
+	logger := middleware.LoggerFromCtx(ctx)
+
+	logger.Info("fetching accounts from repository")
+
+	accounts, err := s.repo.GetAllAccounts(ctx)
+	if err != nil {
+		span.RecordError(err)
+		logger.Error(err.Error(), zap.Error(err))
+		return nil, err
+	}
+
+	span.SetAttributes(
+		attribute.Int("service.result.count", len(accounts)),
+	)
+
+	logger.Info("success fetching accounts",
+		zap.Int("count", len(accounts)),
+	)
+
+	return accounts, nil
 }
 
 // Fetch Account by Id

@@ -16,7 +16,7 @@ import (
 
 type BankService interface {
 	FetchAllBanks(ctx context.Context) ([]models.Bank, error)
-	FetchBankById(id string) (*models.Bank, error)
+	FetchBankById(ctx context.Context, id string) (*models.Bank, error)
 	CreateNewBank(bank models.Bank) (*models.Bank, error)
 	PatchBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
@@ -32,11 +32,10 @@ func NewBanksService(repo repository.BankRepository) BankService {
 
 // Fetch All Data
 func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) {
-	tracer := middleware.TracerFromCtx(ctx)
+
+	_, logger, tracer := middleware.AllCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankService.GetAll")
 	defer span.End()
-
-	logger := middleware.LoggerFromCtx(ctx)
 
 	logger.Info("fetching banks from repository")
 
@@ -59,8 +58,30 @@ func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) 
 }
 
 // Fetch Bank by code
-func (s *bankService) FetchBankById(id string) (*models.Bank, error) {
-	return s.repo.GetBankById(id)
+func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Bank, error) {
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankService.GetById")
+	defer span.End()
+
+	logger.Info("fetching banks from repository")
+
+	bank, err := s.repo.GetBankById(ctx, id)
+	if err != nil {
+		span.RecordError(err)
+		logger.Error("failed fetching bank", zap.Error(err))
+		return nil, err
+	}
+
+	span.SetAttributes(
+		attribute.String("service.result.id", bank.ID.String()),
+	)
+
+	logger.Info("success fetching banks",
+		zap.String("service.result.id", bank.ID.String()),
+	)
+
+	return bank, nil
 }
 
 // Create new bank
