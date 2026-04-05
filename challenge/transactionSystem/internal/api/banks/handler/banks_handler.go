@@ -129,7 +129,7 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error("Database fetch failed", zap.Error(err))
+			logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -215,7 +215,7 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error("Database fetch failed", zap.Error(err))
+			logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -240,31 +240,41 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
 
 		var payload models.Bank
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			helper.PrintLog("bank", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
+			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
+		logger.Info("Payload received", zap.Any("payload", payload))
 
-		newBank, err := h.svc.CreateNewBank(payload)
+		dbCtx, dbSpan := tracer.Start(ctx, "Create-Bank")
+		newBank, err := h.svc.CreateNewBank(dbCtx, payload)
+		dbSpan.End()
+
 		if err != nil {
-			helper.PrintLog("bank", helper.LogPositionHandler, err.Error())
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
 		// Invalidate Existing Cache
-		cacheBankList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
-		errDel := h.rdb.Del(ctx, cacheBankList).Err()
-		if errDel != nil {
-			helper.PrintLog("redis", helper.LogPositionHandler, "Gagal menghapus cache: "+errDel.Error())
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
+		if err := h.rdb.Del(ctx, cacheKey).Err(); err != nil {
+			logger.Error("Failed to invalidate cache", zap.Error(err))
+		} else {
+			span.AddEvent("Cache Invalidated")
 		}
 
-		helper.PrintLog("bank", helper.LogPositionHandler, fmt.Sprintf("Berhasil membuat data bank baru : %+v", newBank))
+		logger.Info("Berhasil membuat data bank baru",
+			zap.Any("bank", newBank),
+		)
+
 		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data bank baru", map[string]any{
 			"bank": newBank,
 		})

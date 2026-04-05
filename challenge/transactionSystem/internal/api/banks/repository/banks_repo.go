@@ -22,7 +22,7 @@ import (
 type BankRepository interface {
 	GetAllBanks(ctx context.Context) ([]models.Bank, error)
 	GetBankById(ctx context.Context, id string) (*models.Bank, error)
-	CreateBank(bank models.Bank) (string, error)
+	CreateBank(ctx context.Context, bank models.Bank) (string, error)
 	UpdateBank(bank models.Bank) (string, error)
 	DeleteBank(bankCode string) error
 }
@@ -124,25 +124,50 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 }
 
 // Post Create New Bank
-func (r *bankRepository) CreateBank(bank models.Bank) (string, error) {
-	var newId string
+func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (string, error) {
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankRepo.Create")
+	defer span.End()
+
 	query := `INSERT INTO banks (bank_code, bank_name) VALUES ($1, $2) RETURNING id`
 
-	helper.PrintLog("bank", helper.LogPositionRepo, fmt.Sprintf("Menambahkan data bank : %+v", bank))
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "banks"),
+	)
 
-	err := r.db.QueryRowx(query, bank.BankCode, bank.BankName).Scan(&newId)
+	logger.Info("executing query",
+		zap.String("query", "INSERT banks"),
+	)
+
+	var newId string
+	err := r.db.QueryRowxContext(ctx, query, bank.BankCode, bank.BankName).Scan(&newId)
 	if err != nil {
+
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				helper.PrintLog("bank", helper.LogPositionRepo, models.ErrDuplicateBank.Error())
+				logger.Error(models.ErrDuplicateBank.Error(), zap.Error(err))
 				return "", models.ErrDuplicateBank
 			}
 		}
 
-		helper.PrintLog("bank", helper.LogPositionRepo, models.ErrDatabaseFailed.Error())
+		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
+
+	span.SetAttributes(
+		attribute.String("db.result.id", newId),
+	)
+
+	logger.Info("query success",
+		zap.String("db.result.id", newId),
+	)
 
 	return newId, nil
 }
