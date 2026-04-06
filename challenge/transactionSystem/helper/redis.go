@@ -33,21 +33,24 @@ func sanitize(input string) string {
 	return res
 }
 
-func SaveToCacheCompressed(ctx context.Context, rdb *redis.Client, key string, data any) {
+func SaveToCacheCompressed(ctx context.Context, rdb *redis.Client, key string, data any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		PrintLog("cache", "Helper", "Gagal marshal JSON: "+err.Error())
-		return
+		return err
 	}
 
 	compressed, err := CompressData(jsonData)
 	if err != nil {
 		PrintLog("cache", "Helper", "Gagal kompresi: "+err.Error())
-		return
+		return err
 	}
 
 	err = rdb.Set(ctx, key, compressed, config.TimeCache).Err()
 	if err != nil {
 		PrintLog("redis", "Helper", "Peringatan: Gagal menyimpan cache: "+err.Error())
+		return err
 	}
+
+	return nil
 }
