@@ -296,7 +296,7 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 
 		logger.Info("Berhasil membuat data bank baru",
 			zap.String("source", "database"),
-			zap.Any("bank", newBank),
+			zap.String("handler.result.id", newBank.ID.String()),
 		)
 
 		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data bank baru", map[string]any{

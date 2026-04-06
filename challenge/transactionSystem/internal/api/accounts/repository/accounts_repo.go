@@ -22,11 +22,11 @@ import (
 
 type AccountRepository interface {
 	GetAllAccounts(ctx context.Context) ([]models.Account, error)
-	GetAccountById(id string) (*models.Account, error)
-	GetTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error)
-	CreateAccount(account models.Account) (string, error)
-	UpdateAccount(account models.Account) (string, error)
-	DeleteAccount(id string) error
+	GetAccountById(ctx context.Context, id string) (*models.Account, error)
+	GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error)
+	CreateAccount(ctx context.Context, account models.Account) (string, error)
+	UpdateAccount(ctx context.Context, account models.Account) (string, error)
+	DeleteAccount(ctx context.Context, id string) error
 }
 
 type accountRepository struct {
@@ -81,7 +81,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 }
 
 // Get Account By ID
-func (r *accountRepository) GetAccountById(id string) (*models.Account, error) {
+func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*models.Account, error) {
 	var account models.Account
 
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data account by id = %s", id))
@@ -106,7 +106,7 @@ func (r *accountRepository) GetAccountById(id string) (*models.Account, error) {
 }
 
 // Get Transaction by Account Id
-func (r *accountRepository) GetTransactionsByAccountId(id string, trxType string) ([]models.Transaction, error) {
+func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error) {
 	var transactions []models.Transaction
 
 	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaksi untuk akun dengan id = %s", id))
@@ -149,7 +149,7 @@ func (r *accountRepository) GetTransactionsByAccountId(id string, trxType string
 }
 
 // Post Create New Account
-func (r *accountRepository) CreateAccount(account models.Account) (string, error) {
+func (r *accountRepository) CreateAccount(ctx context.Context, account models.Account) (string, error) {
 	var newAccount string
 	query := `INSERT INTO accounts (bank_code, account_number, account_holder, balance) VALUES ($1, $2, $3, $4) RETURNING id`
 
@@ -174,7 +174,7 @@ func (r *accountRepository) CreateAccount(account models.Account) (string, error
 }
 
 // Method Update
-func (r *accountRepository) UpdateAccount(account models.Account) (string, error) {
+func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Account) (string, error) {
 	fields := []string{}
 	args := []any{}
 	idx := 1
@@ -239,7 +239,7 @@ func (r *accountRepository) UpdateAccount(account models.Account) (string, error
 }
 
 // Method Delete
-func (r *accountRepository) DeleteAccount(id string) error {
+func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error {
 	query := `DELETE FROM accounts WHERE id = $1`
 
 	result, err := r.db.Exec(query, id)

@@ -29,7 +29,7 @@ func NewBanksService(repo repository.BankRepository) BankService {
 	return &bankService{repo: repo}
 }
 
-const service = "bank"
+const svcBank = "bank"
 
 // Fetch All Data
 func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) {
@@ -43,13 +43,13 @@ func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) 
 
 	svcStart := time.Now()
 	banks, err := s.repo.GetAllBanks(ctx)
-	metrics.ServiceDuration.WithLabelValues(service, operation).
+	metrics.ServiceDuration.WithLabelValues(svcBank, operation).
 		Observe(time.Since(svcStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error("failed fetching banks", zap.Error(err))
-		metrics.ServiceRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, err
 	}
 
@@ -61,7 +61,7 @@ func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) 
 		zap.Int("count", len(banks)),
 	)
 
-	metrics.ServiceRequestsTotal.WithLabelValues(service, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return banks, nil
 }
@@ -78,13 +78,13 @@ func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Ban
 
 	svcStart := time.Now()
 	bank, err := s.repo.GetBankById(ctx, id)
-	metrics.CacheDuration.WithLabelValues(service, operation).
+	metrics.CacheDuration.WithLabelValues(svcBank, operation).
 		Observe(time.Since(svcStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, err
 	}
 
@@ -96,7 +96,7 @@ func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Ban
 		zap.String("service.result.id", bank.ID.String()),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(service, operation, "success").Inc()
+	metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return bank, nil
 }
@@ -115,8 +115,8 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 	if bank.BankCode == "" || bank.BankName == "" {
 		span.RecordError(models.ErrInvalidField)
 		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
-		metrics.BusinessValidationErrors.WithLabelValues(service, operation).Inc()
-		metrics.CacheRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.BusinessValidationErrors.WithLabelValues(svcBank, operation).Inc()
+		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, models.ErrInvalidField
 	}
 
@@ -124,13 +124,13 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 
 	svcStart := time.Now()
 	newId, err := s.repo.CreateBank(ctx, bank)
-	metrics.ServiceDuration.WithLabelValues(service, operation).
+	metrics.ServiceDuration.WithLabelValues(svcBank, operation).
 		Observe(time.Since(svcStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, err
 	}
 
@@ -144,7 +144,7 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 		zap.String("service.result.id", bank.ID.String()),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(service, operation, "success").Inc()
+	metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return &bank, nil
 }
@@ -163,8 +163,8 @@ func (s *bankService) PatchBank(ctx context.Context, bank models.Bank) (string, 
 	if bank.ID == uuid.Nil || bank.BankCode == "" || bank.BankName == "" {
 		span.RecordError(models.ErrInvalidField)
 		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
-		metrics.BusinessValidationErrors.WithLabelValues(service, operation).Inc()
-		metrics.ServiceRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.BusinessValidationErrors.WithLabelValues(svcBank, operation).Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return "", models.ErrInvalidField
 	}
 
@@ -172,13 +172,13 @@ func (s *bankService) PatchBank(ctx context.Context, bank models.Bank) (string, 
 
 	svcStart := time.Now()
 	bankCode, err := s.repo.UpdateBank(ctx, bank)
-	metrics.CacheDuration.WithLabelValues(service, operation).
+	metrics.CacheDuration.WithLabelValues(svcBank, operation).
 		Observe(time.Since(svcStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.ServiceRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return "", err
 	}
 
@@ -190,7 +190,7 @@ func (s *bankService) PatchBank(ctx context.Context, bank models.Bank) (string, 
 		zap.String("service.result.bankCode", bankCode),
 	)
 
-	metrics.ServiceRequestsTotal.WithLabelValues(service, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return bankCode, nil
 }
@@ -209,13 +209,13 @@ func (s *bankService) DeleteBank(ctx context.Context, bankId string) error {
 
 	svcStart := time.Now()
 	err := s.repo.DeleteBank(ctx, bankId)
-	metrics.CacheDuration.WithLabelValues(service, operation).
+	metrics.CacheDuration.WithLabelValues(svcBank, operation).
 		Observe(time.Since(svcStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(service, operation, "error").Inc()
+		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return err
 	}
 
@@ -227,7 +227,7 @@ func (s *bankService) DeleteBank(ctx context.Context, bankId string) error {
 		zap.String("service.delete.id", bankId),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(service, operation, "success").Inc()
+	metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return nil
 }

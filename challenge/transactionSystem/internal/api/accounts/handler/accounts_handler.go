@@ -21,6 +21,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/zap"
 )
 
@@ -82,21 +83,22 @@ func (a *AccountsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
 func (h *AccountsHandler) GetAll() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		cacheStart := time.Now()
 		ctx := r.Context()
 		span, logger, tracer := middleware.AllCtx(ctx)
+		key := "account_list"
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
 		logger.Info("Checking cache", zap.String("key", cacheKey))
 
 		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
 
+		cacheStart := time.Now()
 		val, errRedis := h.rdb.Get(cacheCtx, cacheKey).Bytes()
 		cacheDuration := time.Since(cacheStart).Seconds()
 
 		metrics.CacheDuration.WithLabelValues(
 			"get",
-			"account_list",
+			key,
 		).Observe(cacheDuration)
 
 		cacheSpan.End()
@@ -104,7 +106,7 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		if errRedis == nil {
 
 			metrics.CacheRequestsTotal.WithLabelValues(
-				"account_list",
+				key,
 				"hit",
 			).Inc()
 
@@ -125,7 +127,7 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 			}
 		} else {
 			metrics.CacheRequestsTotal.WithLabelValues(
-				"account_list",
+				key,
 				"miss",
 			).Inc()
 		}
@@ -145,7 +147,14 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		}
 
 		span.SetAttributes(attribute.Int("result.count", len(accounts)))
-		helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, accounts)
+
+		cacheSetStart := time.Now()
+		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, accounts); err != nil {
+			logger.Warn("Failed to save to cache", zap.Error(err))
+		}
+
+		metrics.CacheDuration.WithLabelValues("set", key).
+			Observe(time.Since(cacheSetStart).Seconds())
 
 		logger.Info("Berhasil mengambil list data akun",
 			zap.String("source", "database"),
@@ -162,25 +171,100 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 func (h *AccountsHandler) GetById() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		idStr := r.PathValue("id")
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
+		key := "account_id"
 
-		_, err := uuid.Parse(idStr)
+		idStr := r.PathValue("id")
+		logger.Info("Path received", zap.String("handler.query", idStr))
+
+		idParse, err := uuid.Parse(idStr)
 		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
+			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
-		account, err := h.svc.FetchAccountById(idStr)
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_ID + ":" + idParse.String())
+		logger.Info("Checking cache",
+			zap.String("key", cacheKey),
+			zap.String("handler.query", idParse.String()),
+		)
+
+		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
+		cacheStart := time.Now()
+
+		val, errRedis := h.rdb.Get(cacheCtx, cacheKey).Bytes()
+		cacheDuration := time.Since(cacheStart).Seconds()
+
+		metrics.CacheDuration.WithLabelValues(
+			"get",
+			key,
+		).Observe(cacheDuration)
+
+		cacheSpan.End()
+
+		logger.Info("Mencari akun", zap.String("handler.account.id", idParse.String()))
+
+		if errRedis == nil {
+
+			metrics.CacheRequestsTotal.WithLabelValues(
+				key,
+				"hit",
+			).Inc()
+
+			decompressed, err := helper.DecompressData(val)
+			if err == nil {
+				var account models.Account
+				if err := json.Unmarshal(decompressed, &account); err == nil {
+					span.AddEvent("Cache hit occurred")
+					logger.Info("Cache Hit - Berhasil mengambil data akun",
+						zap.String("source", "redis"),
+						zap.String("handler.result.id", account.ID.String()),
+					)
+					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idParse), map[string]any{
+						"account": account,
+					})
+					return
+				}
+			}
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(
+				key,
+				"miss",
+			).Inc()
+		}
+
+		span.AddEvent("Cache miss")
+		logger.Info("Cache miss", zap.String("key", cacheKey))
+
+		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
+		account, err := h.svc.FetchAccountById(dbCtx, idParse.String())
+		dbSpan.End()
+
 		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr))
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idStr), map[string]any{
+		span.SetAttributes(attribute.String("handler.result.id", account.ID.String()))
+
+		cacheSetStart := time.Now()
+		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, account); err != nil {
+			logger.Warn("Failed to save to cache", zap.Error(err))
+		}
+		metrics.CacheDuration.WithLabelValues("set", key).
+			Observe(time.Since(cacheSetStart).Seconds())
+
+		logger.Info("Berhasil mengambil data bank",
+			zap.String("source", "database"),
+			zap.String("handler.result.id", account.ID.String()),
+		)
+
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", account.ID), map[string]any{
 			"account": account,
 		})
 	}
@@ -190,43 +274,126 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
 		trxTypeEnum := []string{"all", "in", "out"}
+		key := "account_trx"
 
 		idStr := r.PathValue("id")
 		trxType := r.URL.Query().Get("type")
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
-
-		// Valid Uuid
-		_, err := uuid.Parse(idStr)
-		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
-			return
-		}
 
 		if trxType == "" {
 			trxType = "all"
+		}
+
+		logger.Info("Path & trx type received",
+			zap.String("handler.query", idStr),
+			zap.String("handler.trxType", trxType),
+		)
+
+		// Valid Uuid
+		idParse, err := uuid.Parse(idStr)
+		if err != nil {
+			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			span.RecordError(err)
+			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			return
 		}
 
 		isValidType := slices.Contains(trxTypeEnum, trxType)
 
 		// Valid Trx Type
 		if !isValidType {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidTrxType.Error())
+			logger.Error(models.ErrInvalidTrxType.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidTrxType), models.ErrInvalidTrxType.Error())
 			return
 		}
 
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_TRANSACTION + ":" + idParse.String() + ":" + trxType)
+		logger.Info("Checking cache",
+			zap.String("key", cacheKey),
+			zap.String("handler.query", idParse.String()),
+			zap.String("handler.trxType", trxType),
+		)
+
+		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
+		cacheStart := time.Now()
+
+		val, errRedis := h.rdb.Get(cacheCtx, cacheKey).Bytes()
+		cacheDuration := time.Since(cacheStart).Seconds()
+
+		metrics.CacheDuration.WithLabelValues(
+			"get",
+			key,
+		).Observe(cacheDuration)
+
+		cacheSpan.End()
+
+		logger.Info("Mencari transaksi akun",
+			zap.String("handler.account.id", idParse.String()),
+			zap.String("handler.trxType", trxType),
+		)
+
+		if errRedis == nil {
+
+			metrics.CacheRequestsTotal.WithLabelValues(
+				key,
+				"hit",
+			).Inc()
+
+			decompressed, err := helper.DecompressData(val)
+			if err == nil {
+				var transactions []models.Transaction
+				if err := json.Unmarshal(decompressed, &transactions); err == nil {
+					span.AddEvent("Cache hit occurred")
+					logger.Info("Cache Hit - Berhasil mengambil data transaksi akun",
+						zap.String("source", "redis"),
+						zap.Int("handler.result.count", len(transactions)),
+					)
+					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data transaksi dengan id akun = %s & tipe transaksi = %s", idParse, trxType), map[string]any{
+						"transactions": transactions,
+					})
+					return
+				}
+			}
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(
+				key,
+				"miss",
+			).Inc()
+		}
+
+		span.AddEvent("Cache miss")
+		logger.Info("Cache miss", zap.String("key", cacheKey))
+
 		// Exec
-		transactions, err := h.svc.FetchTransactionsByAccountId(idStr, trxType)
+		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
+		transactions, err := h.svc.FetchTransactionsByAccountId(dbCtx, idStr, trxType)
+		dbSpan.End()
+
 		if err != nil {
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		// Success
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil data transaksi terkait akun dengan id = %s", idStr))
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data transaksi terkait akun dengan id = %s", idStr), map[string]any{
+		span.SetAttributes(attribute.Int("handler.result.count", len(transactions)))
+
+		cacheSetStart := time.Now()
+		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, transactions); err != nil {
+			logger.Warn("Failed to save to cache", zap.Error(err))
+		}
+		metrics.CacheDuration.WithLabelValues("set", key).
+			Observe(time.Since(cacheSetStart).Seconds())
+
+		logger.Info("Berhasil mengambil data transaksi akun",
+			zap.String("source", "database"),
+			zap.Int("handler.result.count", len(transactions)),
+		)
+
+		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data transaksi dengan id akun = %s & tipe transaksi = %s", idParse, trxType), map[string]any{
 			"transactions": transactions,
 		})
 	}
@@ -236,30 +403,55 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 func (h *AccountsHandler) Create() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
+		key := "account_list"
+
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidJsonFormat.Error())
+			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		if payload.BankCode == "" || payload.AccountNumber == "" || payload.AccountHolder == "" {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidField.Error())
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
-			return
-		}
+		logger.Info("Payload received", zap.Any("payload", payload))
 
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
+		dbCtx, dbSpan := tracer.Start(ctx, "Create-Account")
+		newAccount, err := h.svc.CreateNewAccount(dbCtx, payload)
+		dbSpan.End()
 
-		newAccount, err := h.svc.CreateNewAccount(payload)
 		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil membuat akun baru : %+v", newAccount))
-		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data account baru", map[string]any{
+		// Invalidate Existing Cache
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
+		cacheStart := time.Now()
+		if err := h.rdb.Del(ctx, cacheKey).Err(); err != nil {
+			metrics.CacheRequestsTotal.WithLabelValues(key, "error").Inc()
+			span.RecordError(err)
+			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
+			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(key, "invalidate").Inc()
+			span.AddEvent("Cache Invalidated")
+		}
+
+		metrics.CacheDuration.WithLabelValues("invalidate", key).
+			Observe(time.Since(cacheStart).Seconds())
+
+		span.SetAttributes(attribute.String("handler.result.id", newAccount.ID.String()))
+
+		logger.Info("Berhasil membuat data akun baru",
+			zap.String("source", "database"),
+			zap.String("handler.result.id", newAccount.ID.String()),
+		)
+
+		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data akun baru", map[string]any{
 			"account": newAccount,
 		})
 	}
@@ -269,51 +461,74 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 func (h *AccountsHandler) Update() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
+		keyList := "account_list"
+		keyId := "account_id"
+
 		idStr := r.PathValue("id")
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+		logger.Info("Path received", zap.String("handler.query", idStr))
 
 		// Valid Uuid
-		_, err := uuid.Parse(idStr)
+		idParse, err := uuid.Parse(idStr)
 		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
+			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			helper.PrintLog("account", helper.LogPositionRepo, models.ErrInvalidJsonFormat.Error())
+			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Berhasil mengambil payload : %+v", payload))
+		logger.Info("Payload received", zap.Any("payload", payload))
 
-		// Jika tidak ada field yang diupdate
-		if payload.AccountHolder == "" && payload.AccountNumber == "" {
-			helper.PrintLog("account", helper.LogPositionRepo, models.ErrInvalidField.Error())
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidField), models.ErrInvalidField.Error())
-			return
-		}
+		payload.ID = idParse
 
-		accountIdParse, err := uuid.Parse(idStr)
+		dbCtx, dbSpan := tracer.Start(ctx, "Update-Account")
+		updatedId, err := h.svc.PatchAccountById(dbCtx, payload)
+		dbSpan.End()
+
 		if err != nil {
-			// Jika gagal di-parse, kembalikan error validasi
-			helper.PrintLog("account", helper.LogPositionRepo, models.ErrInvalidUuid.Error())
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
-			return
-		}
-
-		payload.ID = accountIdParse
-
-		updatedId, err := h.svc.PatchAccountById(payload)
-		if err != nil {
-			helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
 
-		helper.PrintLog("account", helper.LogPositionRepo, "Berhasil mengupdate data akun")
+		// Invalidate Existing Cache
+		cacheKeyList := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
+		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_ID + ":" + updatedId)
+
+		cacheStart := time.Now()
+		if err := h.rdb.Del(ctx, cacheKeyList, cacheKeyId).Err(); err != nil {
+			metrics.CacheRequestsTotal.WithLabelValues(keyList, "error").Inc()
+			metrics.CacheRequestsTotal.WithLabelValues(keyId, "error").Inc()
+			span.RecordError(err)
+			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
+			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(keyList, "invalidate").Inc()
+			metrics.CacheRequestsTotal.WithLabelValues(keyId, "invalidate").Inc()
+			span.AddEvent("Cache Invalidated")
+		}
+		metrics.CacheDuration.WithLabelValues("invalidate", keyList).
+			Observe(time.Since(cacheStart).Seconds())
+		metrics.CacheDuration.WithLabelValues("invalidate", keyId).
+			Observe(time.Since(cacheStart).Seconds())
+
+		span.SetAttributes(attribute.String("handler.result.id", updatedId))
+
+		logger.Info("Berhasil memperbarui data akun",
+			zap.String("source", "database"),
+			zap.String("handler.result.id", updatedId),
+		)
+
 		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data account", map[string]any{
 			"id": updatedId,
 		})
@@ -324,23 +539,60 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 func (h *AccountsHandler) Delete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		ctx := r.Context()
+		span, logger, tracer := middleware.AllCtx(ctx)
+		keyList := "account_list"
+		keyId := "account_id"
+
 		idStr := r.PathValue("id")
-		helper.PrintLog("account", helper.LogPositionHandler, fmt.Sprintf("Mendapatkan id account = %s", idStr))
+		logger.Info("Path received", zap.String("handler.query", idStr))
 
 		// Valid Uuid
-		_, errId := uuid.Parse(idStr)
+		idParse, errId := uuid.Parse(idStr)
 		if errId != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, models.ErrInvalidUuid.Error())
+			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(errId))
+			span.RecordError(errId)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
-		err := h.svc.DeleteAccountById(idStr)
+		dbCtx, dbSpan := tracer.Start(ctx, "Delete-Account")
+		err := h.svc.DeleteAccountById(dbCtx, idParse.String())
+		dbSpan.End()
+
 		if err != nil {
-			helper.PrintLog("account", helper.LogPositionHandler, err.Error())
+			logger.Error(err.Error(), zap.Error(err))
+			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
 		}
+
+		// Invalidate Existing Cache
+		cacheKeyList := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
+		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_ID + ":" + idParse.String())
+
+		cacheStart := time.Now()
+		if err := h.rdb.Del(ctx, cacheKeyList, cacheKeyId).Err(); err != nil {
+			metrics.CacheRequestsTotal.WithLabelValues(keyList, "error").Inc()
+			metrics.CacheRequestsTotal.WithLabelValues(keyId, "error").Inc()
+			span.RecordError(err)
+			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
+			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+		} else {
+			metrics.CacheRequestsTotal.WithLabelValues(keyList, "invalidate").Inc()
+			metrics.CacheRequestsTotal.WithLabelValues(keyId, "invalidate").Inc()
+			span.AddEvent("Cache Invalidated")
+		}
+		metrics.CacheDuration.WithLabelValues("invalidate", keyList).
+			Observe(time.Since(cacheStart).Seconds())
+		metrics.CacheDuration.WithLabelValues("invalidate", keyId).
+			Observe(time.Since(cacheStart).Seconds())
+
+		span.SetAttributes(attribute.String("handler.delete.id", idParse.String()))
+		logger.Info("Berhasil menghapus data akun",
+			zap.String("source", "database"),
+			zap.String("handler.delete.id", idParse.String()),
+		)
 
 		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil menghapus akun dengan id : %s", idStr), map[string]any{})
 	}
