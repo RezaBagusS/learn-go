@@ -1,9 +1,9 @@
 package repository
 
 import (
-	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
+	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"context"
 	"database/sql"
 	"errors"
@@ -37,14 +37,15 @@ func NewAccountRepository(db *sqlx.DB) AccountRepository {
 	return &accountRepository{db: db}
 }
 
+const repoAccount = "account"
+
 // Get All
 func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Account, error) {
 
-	tracer := middleware.TracerFromCtx(ctx)
-	ctx, span := tracer.Start(ctx, "AccountRepo.GetAll")
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "BankRepo.GetAll")
 	defer span.End()
-
-	logger := middleware.LoggerFromCtx(ctx)
+	operation := "select"
 
 	query := `SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at 
 	FROM accounts ORDER BY updated_at desc`
@@ -61,12 +62,17 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 
 	var accounts []models.Account
 
+	dbStart := time.Now()
 	err := r.db.SelectContext(ctx, &accounts, query)
+	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
+		Observe(time.Since(dbStart).Seconds())
+
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		logger.Error("query Failed", zap.Error(err))
+		logger.Error("query failed", zap.Error(err))
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseIssue
 	}
@@ -82,95 +88,195 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 
 // Get Account By ID
 func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*models.Account, error) {
-	var account models.Account
 
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data account by id = %s", id))
-	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.GetById")
+	defer span.End()
+	operation := "select_by_id"
+
 	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts WHERE id = $1"
 
-	err := r.db.Get(&account, query, id)
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "accounts"),
+	)
+
+	logger.Info("executing query",
+		zap.String("query", "SELECT accounts"),
+		zap.String("account.id", id),
+	)
+
+	var account models.Account
+
+	dbStart := time.Now()
+	err := r.db.GetContext(ctx, &account, query, id)
+	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
+		Observe(time.Since(dbStart).Seconds())
+
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		if errors.Is(err, sql.ErrNoRows) {
-			helper.PrintLog("account", helper.LogPositionRepo, "ID Account tidak ditemukan")
+			logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
 			return nil, models.ErrIdNotFound
 		}
 
-		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		logger.Error("query failed", zap.Error(err))
 		return nil, models.ErrDatabaseIssue
 	}
 
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan akun dengan id = %s -> %+v", id, account))
+	span.SetAttributes(
+		attribute.String("db.result.id", account.ID.String()),
+	)
+
+	logger.Info("query success",
+		zap.String("db.result.id", account.ID.String()),
+	)
+
+	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return &account, nil
 }
 
 // Get Transaction by Account Id
 func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error) {
-	var transactions []models.Transaction
 
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Mengambil data transaksi untuk akun dengan id = %s", id))
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.GetTransactionsByAccountId")
+	defer span.End()
+	operation := "select_transactions_by_account"
 
-	// Catatan: Gunakan $1 jika memakai PostgreSQL, atau ? jika memakai MySQL/SQLite
 	baseQuery := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions`
 
 	var whereQuery string
-	var orderByQuery string = "ORDER BY created_at desc"
-	switch {
-	case trxType == "all":
+	orderByQuery := "ORDER BY created_at desc"
+	switch trxType {
+	case "all":
 		whereQuery = "WHERE from_account_id = $1 OR to_account_id = $2"
-	case trxType == "in":
+	case "in":
 		whereQuery = "WHERE to_account_id = $1"
-	case trxType == "out":
+	case "out":
 		whereQuery = "WHERE from_account_id = $1"
 	}
 
 	query := baseQuery + " " + whereQuery + " " + orderByQuery
 
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "transactions"),
+		attribute.String("db.filter.account_id", id),
+		attribute.String("db.filter.trx_type", trxType),
+	)
+
+	logTrxType := trxType
+	if logTrxType == "" {
+		logTrxType = "all"
+	}
+
+	logger.Info("executing query",
+		zap.String("query", "SELECT transactions"),
+		zap.String("account.id", id),
+		zap.String("trx.type", logTrxType),
+	)
+
+	var transactions []models.Transaction
+
 	var err error
+	dbStart := time.Now()
 	if trxType == "all" {
-		err = r.db.Select(&transactions, query, id, id)
+		err = r.db.SelectContext(ctx, &transactions, query, id, id)
 	} else {
-		err = r.db.Select(&transactions, query, id)
+		err = r.db.SelectContext(ctx, &transactions, query, id)
+	}
+	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
+		Observe(time.Since(dbStart).Seconds())
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+
+		logger.Error("query failed", zap.Error(err))
+		return nil, models.ErrDatabaseIssue
 	}
 
 	if transactions == nil {
 		transactions = []models.Transaction{}
 	}
 
-	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
-		return nil, models.ErrDatabaseIssue
-	}
+	span.SetAttributes(
+		attribute.Int("db.result.count", len(transactions)),
+	)
 
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Berhasil mendapatkan seluruh transaksi terkait akun dengan id = %s -> %+v", id, transactions))
+	logger.Info("query success",
+		zap.String("account.id", id),
+		zap.String("trx.type", logTrxType),
+		zap.Int("count", len(transactions)),
+	)
+
+	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return transactions, nil
 }
 
 // Post Create New Account
 func (r *accountRepository) CreateAccount(ctx context.Context, account models.Account) (string, error) {
-	var newAccount string
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.Create")
+	defer span.End()
+	operation := "insert"
+
 	query := `INSERT INTO accounts (bank_code, account_number, account_holder, balance) VALUES ($1, $2, $3, $4) RETURNING id`
 
-	helper.PrintLog("account", helper.LogPositionRepo, fmt.Sprintf("Menambahkan data akun = %+v", account))
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "accounts"),
+	)
 
-	// Gunakan QueryRowx untuk mengeksekusi insert dan menangkap RETURNING id
-	err := r.db.QueryRowx(query, account.BankCode, account.AccountNumber, account.AccountHolder, account.Balance).Scan(&newAccount)
+	logger.Info("executing query",
+		zap.String("query", "INSERT accounts"),
+	)
+
+	var newId string
+	dbStart := time.Now()
+	err := r.db.QueryRowxContext(ctx, query, account.BankCode, account.AccountNumber, account.AccountHolder, account.Balance).Scan(&newId)
+	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
+		Observe(time.Since(dbStart).Seconds())
+
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				helper.PrintLog("account", helper.LogPositionRepo, models.ErrDuplicateAccount.Error())
+				logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
 				return "", models.ErrDuplicateAccount
 			}
 		}
 
-		helper.PrintLog("account", helper.LogPositionRepo, models.ErrDatabaseFailed.Error())
+		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
 
-	return newAccount, nil
+	span.SetAttributes(
+		attribute.String("db.result.id", newId),
+	)
+
+	logger.Info("query success",
+		zap.String("db.result.id", newId),
+	)
+
+	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
+
+	return newId, nil
 }
 
 // Method Update
@@ -178,6 +284,17 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 	fields := []string{}
 	args := []any{}
 	idx := 1
+	operation := "update"
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.Update")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "accounts"),
+	)
 
 	// Cek AccountNumber
 	if account.AccountNumber != "" {
@@ -206,58 +323,116 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 		idx,
 	)
 
-	// Query Execution
-	fmt.Printf("Query [account][repo]: %v \n", query)
-	fmt.Printf("Args [account][repo]: %v \n", args)
+	logger.Info("executing query",
+		zap.String("query", "UPDATE accounts"),
+	)
 
-	result, err := r.db.Exec(query, args...)
+	dbStart := time.Now()
+	result, err := r.db.ExecContext(ctx, query, args...) // ✅ ExecContext, bukan Exec
+	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
+		Observe(time.Since(dbStart).Seconds())
+
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				helper.PrintLog("account", helper.LogPositionRepo, models.ErrDuplicateAccount.Error())
+				logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
 				return "", models.ErrDuplicateAccount
 			}
 		}
 
-		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
 
+	// Cek apakah data dengan ID tersebut ditemukan
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return "", models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		helper.PrintLog("account", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+		logger.Error(models.ErrIdNotFound.Error())
 		return "", models.ErrIdNotFound
 	}
+
+	span.SetAttributes(
+		attribute.String("db.result.id", account.ID.String()),
+	)
+
+	logger.Info("query success",
+		zap.String("db.result.id", account.ID.String()),
+	)
+
+	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return account.ID.String(), nil
 }
 
 // Method Delete
 func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error {
+
+	_, logger, tracer := middleware.AllCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.Delete")
+	defer span.End()
+	operation := "delete"
+
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", "DELETE"),
+		attribute.String("db.table", "accounts"),
+	)
+
 	query := `DELETE FROM accounts WHERE id = $1`
 
-	result, err := r.db.Exec(query, id)
+	logger.Info("executing query",
+		zap.String("query", "DELETE accounts"),
+	)
+
+	dbStart := time.Now()
+	result, err := r.db.ExecContext(ctx, query, id) // ✅ ExecContext, bukan Exec
+	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
+		Observe(time.Since(dbStart).Seconds())
+
 	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, models.ErrDeleteFailed.Error())
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+
+		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return models.ErrDeleteFailed
 	}
 
+	// Cek apakah data dengan ID tersebut ditemukan
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		helper.PrintLog("account", helper.LogPositionRepo, err.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		helper.PrintLog("account", helper.LogPositionRepo, models.ErrIdNotFound.Error())
+		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
+		logger.Error(models.ErrIdNotFound.Error())
 		return models.ErrIdNotFound
 	}
+
+	span.SetAttributes(
+		attribute.String("db.delete.id", id),
+	)
+
+	logger.Info("query success",
+		zap.String("db.delete.id", id),
+	)
+
+	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return nil
 }

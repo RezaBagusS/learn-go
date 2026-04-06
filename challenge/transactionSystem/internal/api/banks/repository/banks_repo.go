@@ -34,7 +34,7 @@ func NewBankRepository(db *sqlx.DB) BankRepository {
 	return &bankRepository{db: db}
 }
 
-const repository = "bank"
+const repoBank = "bank"
 
 // Get All
 func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error) {
@@ -60,7 +60,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 
 	dbStart := time.Now()
 	err := r.db.SelectContext(ctx, &banks, query)
-	metrics.DBQueryDuration.WithLabelValues(repository, operation).
+	metrics.DBQueryDuration.WithLabelValues(repoBank, operation).
 		Observe(time.Since(dbStart).Seconds())
 
 	if err != nil {
@@ -68,7 +68,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 		span.SetStatus(codes.Error, err.Error())
 
 		logger.Error("query failed", zap.Error(err))
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseIssue
 	}
@@ -79,7 +79,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 		zap.Int("rows", len(banks)),
 	)
 
-	metrics.DBQueryTotal.WithLabelValues(repository, operation, "success").Inc()
+	metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "success").Inc()
 
 	return banks, nil
 }
@@ -108,14 +108,14 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 
 	dbStart := time.Now()
 	err := r.db.GetContext(ctx, &bank, query, id)
-	metrics.DBQueryDuration.WithLabelValues(repository, operation).
+	metrics.DBQueryDuration.WithLabelValues(repoBank, operation).
 		Observe(time.Since(dbStart).Seconds())
 
 	if err != nil {
 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		if errors.Is(err, sql.ErrNoRows) {
 			logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
@@ -135,7 +135,7 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 		zap.String("db.result.id", bank.ID.String()),
 	)
 
-	metrics.DBQueryTotal.WithLabelValues(repository, operation, "success").Inc()
+	metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "success").Inc()
 
 	return &bank, nil
 }
@@ -163,13 +163,13 @@ func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (stri
 	var newId string
 	dbStart := time.Now()
 	err := r.db.QueryRowxContext(ctx, query, bank.BankCode, bank.BankName).Scan(&newId)
-	metrics.DBQueryDuration.WithLabelValues(repository, operation).
+	metrics.DBQueryDuration.WithLabelValues(repoBank, operation).
 		Observe(time.Since(dbStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
@@ -192,7 +192,7 @@ func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (stri
 		zap.String("db.result.id", newId),
 	)
 
-	metrics.DBQueryTotal.WithLabelValues(repository, operation, "success").Inc()
+	metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "success").Inc()
 
 	return newId, nil
 }
@@ -243,14 +243,14 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 
 	dbStart := time.Now()
 	result, err := r.db.ExecContext(ctx, query, args...)
-	metrics.DBQueryDuration.WithLabelValues(repository, operation).
+	metrics.DBQueryDuration.WithLabelValues(repoBank, operation).
 		Observe(time.Since(dbStart).Seconds())
 
 	if err != nil {
 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
@@ -267,13 +267,13 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 	// Cek apakah data dengan ID tersebut ditemukan
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return "", models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 		logger.Error(models.ErrIdNotFound.Error())
 		return "", models.ErrIdNotFound
 	}
@@ -286,7 +286,7 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 		zap.String("db.result.bankCode", bank.BankCode),
 	)
 
-	metrics.DBQueryTotal.WithLabelValues(repository, operation, "success").Inc()
+	metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "success").Inc()
 
 	return bank.BankCode, nil
 }
@@ -314,14 +314,14 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 
 	dbStart := time.Now()
 	result, err := r.db.ExecContext(ctx, query, bankId)
-	metrics.DBQueryDuration.WithLabelValues(repository, operation).
+	metrics.DBQueryDuration.WithLabelValues(repoBank, operation).
 		Observe(time.Since(dbStart).Seconds())
 
 	if err != nil {
 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return models.ErrDeleteFailed
@@ -330,13 +330,13 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 	// Cek apakah data dengan ID tersebut ditemukan
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
-		metrics.DBQueryTotal.WithLabelValues(repository, operation, "error").Inc()
+		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 		logger.Error(models.ErrIdNotFound.Error())
 		return models.ErrIdNotFound
 	}
@@ -349,7 +349,7 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 		zap.String("db.delete.id", bankId),
 	)
 
-	metrics.DBQueryTotal.WithLabelValues(repository, operation, "success").Inc()
+	metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "success").Inc()
 
 	return nil
 }
