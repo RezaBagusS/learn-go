@@ -47,7 +47,7 @@ func (s *Server) registerRoutes() {
 
 	// Transaction Domain =====
 	trxHandler := transactionHandler.NewTransactionsHandler(s.mux, s.db, s.rdb)
-	trxHandler.MapRoutes()
+	trxHandler.MapRoutes(s.obs)
 
 	s.mux.Handle("/metrics", promhttp.Handler())
 }
