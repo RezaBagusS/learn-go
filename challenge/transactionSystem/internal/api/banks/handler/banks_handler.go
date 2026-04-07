@@ -33,7 +33,7 @@ type BanksHandler struct {
 // Bank handler init
 func NewBanksHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *BanksHandler {
 
-	keyManager := helper.NewRedisKeyManager("transaction_system", "bank")
+	keyManager := helper.NewRedisKeyManager("transaction_system", config.DOMAIN_BANK)
 	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
 	bankRepo := repository.NewBankRepository(db)
 	bankSvc := service.NewBanksService(bankRepo)
@@ -165,7 +165,7 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 		idStr := r.PathValue("identifier")
 		logger.Info("Path received", zap.String("handler.query", idStr))
 
-		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + idStr)
+		cacheKey := h.keyManager.Generate(config.REDIS_KEY_BANK_ID, idStr)
 		logger.Info("Checking cache",
 			zap.String("key", cacheKey),
 			zap.String("handler.query", idStr),
@@ -349,7 +349,7 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 
 		// Invalidate Existing Cache
 		cacheKeyList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
-		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + bankCode)
+		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID, bankCode)
 
 		cacheStart := time.Now()
 		if err := h.rdb.Del(ctx, cacheKeyList, cacheKeyId).Err(); err != nil {
@@ -412,7 +412,7 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 
 		// Invalidate Existing Cache
 		cacheKeyList := h.keyManager.Generate(config.REDIS_KEY_BANK_LIST)
-		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID + ":" + bankIdParse.String())
+		cacheKeyId := h.keyManager.Generate(config.REDIS_KEY_BANK_ID, bankIdParse.String())
 
 		cacheStart := time.Now()
 		if err := h.rdb.Del(ctx, cacheKeyList, cacheKeyId).Err(); err != nil {

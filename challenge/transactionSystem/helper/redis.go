@@ -22,8 +22,17 @@ func NewRedisKeyManager(service, domain string) *RedisKeyManager {
 	}
 }
 
-func (m *RedisKeyManager) Generate(identifier string) string {
-	return fmt.Sprintf("%s:%s:%s", m.service, m.domain, sanitize(identifier))
+func (m *RedisKeyManager) Generate(identifier string, parts ...string) string {
+	if len(parts) == 0 {
+		return fmt.Sprintf("%s:%s:%s", m.service, m.domain, sanitize(identifier))
+	}
+
+	sanitizedParts := make([]string, len(parts))
+	for i, p := range parts {
+		sanitizedParts[i] = sanitize(p)
+	}
+
+	return fmt.Sprintf("%s:%s:%s:%s", m.service, m.domain, sanitize(identifier), strings.Join(sanitizedParts, ":"))
 }
 
 func sanitize(input string) string {
