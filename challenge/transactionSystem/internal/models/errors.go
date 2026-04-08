@@ -34,6 +34,9 @@ var (
 	ErrLogicCommitTrx   = errors.New("Gagal melakukan commit transaksi")
 
 	ErrRedisInvalidate = errors.New("Gagal menghapus cache redis")
+
+	ErrUnauthorized      = errors.New("Header otorisasi tidak ada atau tidak valid")
+	ErrUnauthorizedToken = errors.New("Token tidak valid atau sudah kadaluarsa")
 )
 
 func StatusCodeHandler(err error) int {
@@ -52,6 +55,8 @@ func StatusCodeHandler(err error) int {
 	case errors.Is(err, ErrLogicSelfTranser), errors.Is(err, ErrLogicBalanceTrx),
 		errors.Is(err, ErrLogicMutationTrx), errors.Is(err, ErrLogicCommitTrx):
 		statusCode = http.StatusUnprocessableEntity
+	case errors.Is(err, ErrUnauthorized), errors.Is(err, ErrUnauthorizedToken):
+		statusCode = http.StatusUnauthorized
 	default:
 		statusCode = http.StatusInternalServerError
 	}

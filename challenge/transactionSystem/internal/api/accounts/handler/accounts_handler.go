@@ -31,6 +31,7 @@ type AccountsHandler struct {
 	rdb         *redis.Client
 	keyManager  *helper.RedisKeyManager
 	idempotency *middleware.IdempotencyMiddleware
+	logger      *zap.Logger
 }
 
 func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *AccountsHandler {
@@ -39,7 +40,7 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *Acc
 	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
 	bankRepo := bankRepository.NewBankRepository(db)
 	bankSvc := bankService.NewBanksService(bankRepo)
-
+	logger := helper.Log
 	accountRepo := repository.NewAccountRepository(db)
 	accountSvc := service.NewAccountsService(accountRepo, bankSvc)
 
@@ -49,32 +50,36 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *Acc
 		rdb:         rdb,
 		keyManager:  keyManager,
 		idempotency: idempotency,
+		logger:      logger,
 	}
 }
 
 func (a *AccountsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
+
+	version := "v1"
+
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, "/accounts"),
+		helper.NewAPIPath(http.MethodGet, version, "/accounts"),
 		obs.Wrap("AccountHandler.GetAll", config.DOMAIN_ACCOUNT, a.GetAll()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, "/account/{id}"),
+		helper.NewAPIPath(http.MethodGet, version, "/account/{id}"),
 		obs.Wrap("AccountHandler.GetById", config.DOMAIN_ACCOUNT, a.GetById()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, "/account/{id}/transactions"),
+		helper.NewAPIPath(http.MethodGet, version, "/account/{id}/transactions"),
 		obs.Wrap("AccountHandler.GetTrx", config.DOMAIN_ACCOUNT, a.GetTransactions()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodPost, "/account"),
+		helper.NewAPIPath(http.MethodPost, version, "/account"),
 		obs.Wrap("AccountHandler.Create", config.DOMAIN_ACCOUNT, a.idempotency.Check(a.Create())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodPatch, "/account/{id}"),
+		helper.NewAPIPath(http.MethodPatch, version, "/account/{id}"),
 		obs.Wrap("AccountHandler.Update", config.DOMAIN_ACCOUNT, a.idempotency.Check(a.Update())).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodDelete, "/account/{id}"),
+		helper.NewAPIPath(http.MethodDelete, version, "/account/{id}"),
 		obs.Wrap("AccountHandler.Delete", config.DOMAIN_ACCOUNT, a.Delete()).ServeHTTP,
 	)
 }
@@ -84,11 +89,11 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		key := "account_list"
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
-		logger.Info("Checking cache", zap.String("key", cacheKey))
+		h.logger.Info("Checking cache", zap.String("key", cacheKey))
 
 		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
 
@@ -115,7 +120,7 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 				var accounts []models.Account
 				if err := json.Unmarshal(decompressed, &accounts); err == nil {
 					span.AddEvent("Cache hit occured")
-					logger.Info("Cache Hit - Berhasil mengambil list data account",
+					h.logger.Info("Cache Hit - Berhasil mengambil list data account",
 						zap.String("source", "Redis"),
 						zap.Int("count", len(accounts)),
 					)
@@ -133,14 +138,14 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		}
 
 		span.AddEvent("Cache miss")
-		logger.Info("Cache miss", zap.String("key", cacheKey))
+		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-database")
 		accounts, err := h.svc.FetchAllAccounts(dbCtx)
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error("Database fetch failed", zap.Error(err))
+			h.logger.Error("Database fetch failed", zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -150,13 +155,13 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 
 		cacheSetStart := time.Now()
 		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, accounts); err != nil {
-			logger.Warn("Failed to save to cache", zap.Error(err))
+			h.logger.Warn("Failed to save to cache", zap.Error(err))
 		}
 
 		metrics.CacheDuration.WithLabelValues("set", key).
 			Observe(time.Since(cacheSetStart).Seconds())
 
-		logger.Info("Berhasil mengambil list data akun",
+		h.logger.Info("Berhasil mengambil list data akun",
 			zap.String("source", "database"),
 			zap.Int("count", len(accounts)),
 		)
@@ -172,22 +177,22 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		key := "account_id"
 
 		idStr := r.PathValue("id")
-		logger.Info("Path received", zap.String("handler.query", idStr))
+		h.logger.Info("Path received", zap.String("handler.query", idStr))
 
 		idParse, err := uuid.Parse(idStr)
 		if err != nil {
-			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
 		}
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_ID, idParse.String())
-		logger.Info("Checking cache",
+		h.logger.Info("Checking cache",
 			zap.String("key", cacheKey),
 			zap.String("handler.query", idParse.String()),
 		)
@@ -205,7 +210,7 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 
 		cacheSpan.End()
 
-		logger.Info("Mencari akun", zap.String("handler.account.id", idParse.String()))
+		h.logger.Info("Mencari akun", zap.String("handler.account.id", idParse.String()))
 
 		if errRedis == nil {
 
@@ -219,7 +224,7 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 				var account models.Account
 				if err := json.Unmarshal(decompressed, &account); err == nil {
 					span.AddEvent("Cache hit occurred")
-					logger.Info("Cache Hit - Berhasil mengambil data akun",
+					h.logger.Info("Cache Hit - Berhasil mengambil data akun",
 						zap.String("source", "redis"),
 						zap.String("handler.result.id", account.ID.String()),
 					)
@@ -237,14 +242,14 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		}
 
 		span.AddEvent("Cache miss")
-		logger.Info("Cache miss", zap.String("key", cacheKey))
+		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
 		account, err := h.svc.FetchAccountById(dbCtx, idParse.String())
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -254,12 +259,12 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 
 		cacheSetStart := time.Now()
 		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, account); err != nil {
-			logger.Warn("Failed to save to cache", zap.Error(err))
+			h.logger.Warn("Failed to save to cache", zap.Error(err))
 		}
 		metrics.CacheDuration.WithLabelValues("set", key).
 			Observe(time.Since(cacheSetStart).Seconds())
 
-		logger.Info("Berhasil mengambil data bank",
+		h.logger.Info("Berhasil mengambil data bank",
 			zap.String("source", "database"),
 			zap.String("handler.result.id", account.ID.String()),
 		)
@@ -275,7 +280,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		trxTypeEnum := []string{"all", "in", "out"}
 		key := "account_trx"
 
@@ -286,7 +291,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 			trxType = "all"
 		}
 
-		logger.Info("Path & trx type received",
+		h.logger.Info("Path & trx type received",
 			zap.String("handler.query", idStr),
 			zap.String("handler.trxType", trxType),
 		)
@@ -294,7 +299,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		// Valid Uuid
 		idParse, err := uuid.Parse(idStr)
 		if err != nil {
-			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
@@ -304,14 +309,14 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 
 		// Valid Trx Type
 		if !isValidType {
-			logger.Error(models.ErrInvalidTrxType.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidTrxType.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidTrxType), models.ErrInvalidTrxType.Error())
 			return
 		}
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_TRANSACTION + ":" + idParse.String() + ":" + trxType)
-		logger.Info("Checking cache",
+		h.logger.Info("Checking cache",
 			zap.String("key", cacheKey),
 			zap.String("handler.query", idParse.String()),
 			zap.String("handler.trxType", trxType),
@@ -330,7 +335,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 
 		cacheSpan.End()
 
-		logger.Info("Mencari transaksi akun",
+		h.logger.Info("Mencari transaksi akun",
 			zap.String("handler.account.id", idParse.String()),
 			zap.String("handler.trxType", trxType),
 		)
@@ -347,7 +352,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 				var transactions []models.Transaction
 				if err := json.Unmarshal(decompressed, &transactions); err == nil {
 					span.AddEvent("Cache hit occurred")
-					logger.Info("Cache Hit - Berhasil mengambil data transaksi akun",
+					h.logger.Info("Cache Hit - Berhasil mengambil data transaksi akun",
 						zap.String("source", "redis"),
 						zap.Int("handler.result.count", len(transactions)),
 					)
@@ -365,7 +370,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		}
 
 		span.AddEvent("Cache miss")
-		logger.Info("Cache miss", zap.String("key", cacheKey))
+		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		// Exec
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
@@ -373,7 +378,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -383,12 +388,12 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 
 		cacheSetStart := time.Now()
 		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, transactions); err != nil {
-			logger.Warn("Failed to save to cache", zap.Error(err))
+			h.logger.Warn("Failed to save to cache", zap.Error(err))
 		}
 		metrics.CacheDuration.WithLabelValues("set", key).
 			Observe(time.Since(cacheSetStart).Seconds())
 
-		logger.Info("Berhasil mengambil data transaksi akun",
+		h.logger.Info("Berhasil mengambil data transaksi akun",
 			zap.String("source", "database"),
 			zap.Int("handler.result.count", len(transactions)),
 		)
@@ -404,25 +409,25 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		key := "account_list"
 
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		logger.Info("Payload received", zap.Any("payload", payload))
+		h.logger.Info("Payload received", zap.Any("payload", payload))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Create-Account")
 		newAccount, err := h.svc.CreateNewAccount(dbCtx, payload)
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -435,7 +440,7 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			metrics.CacheRequestsTotal.WithLabelValues(key, "error").Inc()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
-			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+			h.logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
 		} else {
 			metrics.CacheRequestsTotal.WithLabelValues(key, "invalidate").Inc()
 			span.AddEvent("Cache Invalidated")
@@ -446,7 +451,7 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 
 		span.SetAttributes(attribute.String("handler.result.id", newAccount.ID.String()))
 
-		logger.Info("Berhasil membuat data akun baru",
+		h.logger.Info("Berhasil membuat data akun baru",
 			zap.String("source", "database"),
 			zap.String("handler.result.id", newAccount.ID.String()),
 		)
@@ -462,17 +467,17 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		keyList := "account_list"
 		keyId := "account_id"
 
 		idStr := r.PathValue("id")
-		logger.Info("Path received", zap.String("handler.query", idStr))
+		h.logger.Info("Path received", zap.String("handler.query", idStr))
 
 		// Valid Uuid
 		idParse, err := uuid.Parse(idStr)
 		if err != nil {
-			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
@@ -480,13 +485,13 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		logger.Info("Payload received", zap.Any("payload", payload))
+		h.logger.Info("Payload received", zap.Any("payload", payload))
 
 		payload.ID = idParse
 
@@ -495,7 +500,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -511,7 +516,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 			metrics.CacheRequestsTotal.WithLabelValues(keyId, "error").Inc()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
-			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+			h.logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
 		} else {
 			metrics.CacheRequestsTotal.WithLabelValues(keyList, "invalidate").Inc()
 			metrics.CacheRequestsTotal.WithLabelValues(keyId, "invalidate").Inc()
@@ -524,7 +529,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 
 		span.SetAttributes(attribute.String("handler.result.id", updatedId))
 
-		logger.Info("Berhasil memperbarui data akun",
+		h.logger.Info("Berhasil memperbarui data akun",
 			zap.String("source", "database"),
 			zap.String("handler.result.id", updatedId),
 		)
@@ -540,17 +545,17 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		keyList := "account_list"
 		keyId := "account_id"
 
 		idStr := r.PathValue("id")
-		logger.Info("Path received", zap.String("handler.query", idStr))
+		h.logger.Info("Path received", zap.String("handler.query", idStr))
 
 		// Valid Uuid
 		idParse, errId := uuid.Parse(idStr)
 		if errId != nil {
-			logger.Error(models.ErrInvalidUuid.Error(), zap.Error(errId))
+			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(errId))
 			span.RecordError(errId)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
@@ -561,7 +566,7 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -577,7 +582,7 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 			metrics.CacheRequestsTotal.WithLabelValues(keyId, "error").Inc()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
-			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+			h.logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
 		} else {
 			metrics.CacheRequestsTotal.WithLabelValues(keyList, "invalidate").Inc()
 			metrics.CacheRequestsTotal.WithLabelValues(keyId, "invalidate").Inc()
@@ -589,7 +594,7 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 			Observe(time.Since(cacheStart).Seconds())
 
 		span.SetAttributes(attribute.String("handler.delete.id", idParse.String()))
-		logger.Info("Berhasil menghapus data akun",
+		h.logger.Info("Berhasil menghapus data akun",
 			zap.String("source", "database"),
 			zap.String("handler.delete.id", idParse.String()),
 		)

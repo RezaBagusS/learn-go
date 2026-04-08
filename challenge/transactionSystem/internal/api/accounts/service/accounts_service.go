@@ -1,6 +1,7 @@
 package service
 
 import (
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/service"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
@@ -26,12 +27,16 @@ type AccountsService interface {
 type accountsService struct {
 	repo    repository.AccountRepository // Depend pada Interface, bukan struct DB langsung
 	bankSvc service.BankService
+	logger  *zap.Logger
 }
 
 func NewAccountsService(repo repository.AccountRepository, bankSvc service.BankService) AccountsService {
+	logger := helper.Log
+
 	return &accountsService{
 		repo:    repo,
 		bankSvc: bankSvc,
+		logger:  logger,
 	}
 }
 
@@ -40,12 +45,12 @@ const svcAccount = "account"
 // Fetch All Data
 func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Account, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.GetAll")
 	defer span.End()
 	operation := "fetch_all"
 
-	logger.Info("fetching accounts from repository")
+	s.logger.Info("fetching accounts from repository")
 
 	svcStart := time.Now()
 	accounts, err := s.repo.GetAllAccounts(ctx)
@@ -54,7 +59,7 @@ func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Accoun
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error("failed fetching accounts", zap.Error(err))
+		s.logger.Error("failed fetching accounts", zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
@@ -63,7 +68,7 @@ func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Accoun
 		attribute.Int("service.result.count", len(accounts)),
 	)
 
-	logger.Info("success fetching accounts",
+	s.logger.Info("success fetching accounts",
 		zap.Int("count", len(accounts)),
 	)
 
@@ -75,12 +80,12 @@ func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Accoun
 // Fetch Account by Id
 func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*models.Account, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.GetById")
 	defer span.End()
 	operation := "fetch_by_id"
 
-	logger.Info("fetching account from repository")
+	s.logger.Info("fetching account from repository")
 
 	svcStart := time.Now()
 	account, err := s.repo.GetAccountById(ctx, id)
@@ -89,7 +94,7 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
@@ -98,7 +103,7 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 		attribute.String("service.result.id", account.ID.String()),
 	)
 
-	logger.Info("success fetching account",
+	s.logger.Info("success fetching account",
 		zap.String("service.result.id", account.ID.String()),
 	)
 
@@ -110,13 +115,13 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 // Fetch Transaction by Account Id
 func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.GetTrxById")
 	defer span.End()
 	operation := "fetch_by_id"
 	operationTrx := "fetch_trx_by_id"
 
-	logger.Info("checking valid accound id")
+	s.logger.Info("checking valid accound id")
 
 	svcStart := time.Now()
 	_, err := s.repo.GetAccountById(ctx, id)
@@ -125,14 +130,14 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
 
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
 
-	logger.Info("fetching trx account from repository")
+	s.logger.Info("fetching trx account from repository")
 
 	svcStartTrx := time.Now()
 	transactions, err := s.repo.GetTransactionsByAccountId(ctx, id, trxType)
@@ -141,7 +146,7 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationTrx, "error").Inc()
 		return nil, err
 	}
@@ -150,7 +155,7 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 		attribute.Int("service.result.count", len(transactions)),
 	)
 
-	logger.Info("success fetching account",
+	s.logger.Info("success fetching account",
 		zap.Int("service.result.count", len(transactions)),
 	)
 
@@ -162,17 +167,17 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 // Create new account
 func (s *accountsService) CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Create")
 	defer span.End()
 	operation := "account_exist"
 	operationCreate := "create"
 
-	logger.Info("checking payload")
+	s.logger.Info("checking payload")
 
 	if account.BankCode == "" || account.AccountNumber == "" || account.AccountHolder == "" {
 		span.RecordError(models.ErrInvalidField)
-		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
+		s.logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, models.ErrInvalidField
@@ -181,13 +186,13 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 	// Balance checking ...
 	if account.Balance < 0 {
 		span.RecordError(models.ErrInvalidInitBalance)
-		logger.Error(models.ErrInvalidInitBalance.Error(), zap.Error(models.ErrInvalidInitBalance))
+		s.logger.Error(models.ErrInvalidInitBalance.Error(), zap.Error(models.ErrInvalidInitBalance))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, models.ErrInvalidInitBalance
 	}
 
-	logger.Info("checking bank code")
+	s.logger.Info("checking bank code")
 
 	svcStartCheckBank := time.Now()
 	_, err := s.bankSvc.FetchBankById(ctx, account.BankCode)
@@ -196,14 +201,14 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
 
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
 
-	logger.Info("creating new account")
+	s.logger.Info("creating new account")
 
 	// Simpan ke repository
 	svcStart := time.Now()
@@ -213,7 +218,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationCreate, "error").Inc()
 		return nil, err
 	}
@@ -224,7 +229,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		attribute.String("service.result.id", returnedId),
 	)
 
-	logger.Info("success creating new account",
+	s.logger.Info("success creating new account",
 		zap.String("service.result.id", returnedId),
 	)
 
@@ -236,23 +241,23 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 // Update account
 func (s *accountsService) PatchAccountById(ctx context.Context, account models.Account) (string, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Update")
 	defer span.End()
 	operation := "update"
 
-	logger.Info("checking payload")
+	s.logger.Info("checking payload")
 
 	// Jika tidak ada field yang diupdate
 	if account.AccountHolder == "" && account.AccountNumber == "" {
 		span.RecordError(models.ErrInvalidField)
-		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
+		s.logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return "", models.ErrInvalidField
 	}
 
-	logger.Info("updating account data")
+	s.logger.Info("updating account data")
 
 	svcStart := time.Now()
 	getId, err := s.repo.UpdateAccount(ctx, account)
@@ -261,7 +266,7 @@ func (s *accountsService) PatchAccountById(ctx context.Context, account models.A
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return "", err
 	}
@@ -270,7 +275,7 @@ func (s *accountsService) PatchAccountById(ctx context.Context, account models.A
 		attribute.String("service.result.id", getId),
 	)
 
-	logger.Info("success updating account data",
+	s.logger.Info("success updating account data",
 		zap.String("service.result.id", getId),
 	)
 
@@ -281,12 +286,12 @@ func (s *accountsService) PatchAccountById(ctx context.Context, account models.A
 
 // Delete account
 func (s *accountsService) DeleteAccountById(ctx context.Context, id string) error {
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Delete")
 	defer span.End()
 	operation := "delete"
 
-	logger.Info("deleting account data",
+	s.logger.Info("deleting account data",
 		zap.String("service.delete.id", id),
 	)
 
@@ -297,7 +302,7 @@ func (s *accountsService) DeleteAccountById(ctx context.Context, id string) erro
 
 	if err != nil {
 		span.RecordError(err)
-		logger.Error(err.Error(), zap.Error(err))
+		s.logger.Error(err.Error(), zap.Error(err))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return err
 	}
@@ -306,7 +311,7 @@ func (s *accountsService) DeleteAccountById(ctx context.Context, id string) erro
 		attribute.String("service.delete.id", id),
 	)
 
-	logger.Info("success deleting account data",
+	s.logger.Info("success deleting account data",
 		zap.String("service.delete.id", id),
 	)
 

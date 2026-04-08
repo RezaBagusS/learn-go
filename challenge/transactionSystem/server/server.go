@@ -3,6 +3,7 @@ package server
 import (
 	accountHandler "belajar-go/challenge/transactionSystem/internal/api/accounts/handler"
 	bankHandler "belajar-go/challenge/transactionSystem/internal/api/banks/handler"
+	oauthHandler "belajar-go/challenge/transactionSystem/internal/api/oauth/handler"
 	transactionHandler "belajar-go/challenge/transactionSystem/internal/api/transactions/handler"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"fmt"
@@ -36,6 +37,10 @@ func NewServer(db *sqlx.DB, rdb *redis.Client) *Server {
 }
 
 func (s *Server) registerRoutes() {
+
+	// Oauth
+	oauthHandler := oauthHandler.NewTokenHandler(s.mux, s.rdb)
+	oauthHandler.MapRoutes(s.obs)
 
 	// Account Domain =====
 	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db, s.rdb)

@@ -28,6 +28,7 @@ type TransactionsHandler struct {
 	rdb         *redis.Client
 	keyManager  *helper.RedisKeyManager
 	idempotency *middleware.IdempotencyMiddleware
+	logger      *zap.Logger
 }
 
 func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *TransactionsHandler {
@@ -35,6 +36,7 @@ func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) 
 	TrxSvc := service.NewTransactionsService(trxRepo)
 	keyManager := helper.NewRedisKeyManager("transaction_system", config.DOMAIN_TRANSACTION)
 	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
+	logger := helper.Log
 
 	return &TransactionsHandler{
 		mux:         mux,
@@ -42,24 +44,30 @@ func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) 
 		rdb:         rdb,
 		keyManager:  keyManager,
 		idempotency: idempotency,
+		logger:      logger,
 	}
 }
 
 func (a *TransactionsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
+
+	version := "v1.0"
+
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, "/transactions"),
-		obs.Wrap("TransactionHandler.GetAll", config.DOMAIN_TRANSACTION, a.GetAll()).ServeHTTP,
+		helper.NewAPIPath(http.MethodGet, version, "/transactions"),
+		middleware.ValidateSNAPToken(
+			obs.Wrap("TransactionHandler.GetAll", config.DOMAIN_TRANSACTION, a.GetAll()),
+		).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, "/transactions/summary"),
+		helper.NewAPIPath(http.MethodGet, version, "/transactions/summary"),
 		obs.Wrap("TransactionHandler.GetSummary", config.DOMAIN_TRANSACTION, a.GetSummary()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, "/transaction/{id}"),
+		helper.NewAPIPath(http.MethodGet, version, "/transaction/{id}"),
 		obs.Wrap("TransactionHandler.GetById", config.DOMAIN_TRANSACTION, a.GetById()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodPost, "/transaction"),
+		helper.NewAPIPath(http.MethodPost, version, "/transaction"),
 		obs.Wrap("TransactionHandler.Create", config.DOMAIN_TRANSACTION, a.idempotency.Check(a.Create())).ServeHTTP,
 	)
 }
@@ -69,11 +77,11 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		key := "transaction_list"
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_TRANSACTION_LIST)
-		logger.Info("Checking cache", zap.String("key", cacheKey))
+		h.logger.Info("Checking cache", zap.String("key", cacheKey))
 
 		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
 		cacheStart := time.Now()
@@ -99,7 +107,7 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 				var transactions []models.Transaction
 				if err := json.Unmarshal(decompressed, &transactions); err == nil {
 					span.AddEvent("Cache hit occurred")
-					logger.Info("Cache Hit - Berhasil mengambil list data transaksi",
+					h.logger.Info("Cache Hit - Berhasil mengambil list data transaksi",
 						zap.String("source", "redis"),
 						zap.Int("count", len(transactions)),
 					)
@@ -115,14 +123,14 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 		}
 
 		span.AddEvent("Cache miss")
-		logger.Info("Cache miss", zap.String("key", cacheKey))
+		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
 		transactions, err := h.svc.FetchAllTransactions(dbCtx)
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -132,12 +140,12 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 
 		cacheSetStart := time.Now()
 		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, transactions); err != nil {
-			logger.Warn("Failed to save to cache", zap.Error(err))
+			h.logger.Warn("Failed to save to cache", zap.Error(err))
 		}
 		metrics.CacheDuration.WithLabelValues("set", key).
 			Observe(time.Since(cacheSetStart).Seconds())
 
-		logger.Info("Berhasil mengambil list data transaksi",
+		h.logger.Info("Berhasil mengambil list data transaksi",
 			zap.String("source", "database"),
 			zap.Int("count", len(transactions)),
 		)
@@ -153,7 +161,7 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 
 		dateStr := r.URL.Query().Get("date")
 		if dateStr == "" {
@@ -163,7 +171,7 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 		// YYYY-MM-DD
 		timeParse, errDate := time.Parse("2006-01-02", dateStr)
 		if errDate != nil {
-			logger.Error("Invalid date format", zap.String("date", dateStr), zap.Error(errDate))
+			h.logger.Error("Invalid date format", zap.String("date", dateStr), zap.Error(errDate))
 			span.RecordError(errDate)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidDate), models.ErrInvalidDate.Error())
 			return
@@ -171,7 +179,7 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 
 		key := "transaction_summary"
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_TRANSACTION_SUMMARY, dateStr)
-		logger.Info("Checking cache", zap.String("key", cacheKey), zap.String("date", dateStr))
+		h.logger.Info("Checking cache", zap.String("key", cacheKey), zap.String("date", dateStr))
 
 		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
 		cacheStart := time.Now()
@@ -197,7 +205,7 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 				var transactions []models.Transaction
 				if err := json.Unmarshal(decompressed, &transactions); err == nil {
 					span.AddEvent("Cache hit occurred")
-					logger.Info("Cache Hit - Berhasil mengambil data summary transaksi",
+					h.logger.Info("Cache Hit - Berhasil mengambil data summary transaksi",
 						zap.String("source", "redis"),
 						zap.String("date", dateStr),
 						zap.Int("count", len(transactions)),
@@ -214,14 +222,14 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 		}
 
 		span.AddEvent("Cache miss")
-		logger.Info("Cache miss", zap.String("key", cacheKey), zap.String("date", dateStr))
+		h.logger.Info("Cache miss", zap.String("key", cacheKey), zap.String("date", dateStr))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
 		transactions, err := h.svc.FetchSummaryToday(dbCtx, timeParse)
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -234,12 +242,12 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 
 		cacheSetStart := time.Now()
 		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, transactions); err != nil {
-			logger.Warn("Failed to save to cache", zap.Error(err))
+			h.logger.Warn("Failed to save to cache", zap.Error(err))
 		}
 		metrics.CacheDuration.WithLabelValues("set", key).
 			Observe(time.Since(cacheSetStart).Seconds())
 
-		logger.Info("Berhasil mengambil data summary transaksi",
+		h.logger.Info("Berhasil mengambil data summary transaksi",
 			zap.String("source", "database"),
 			zap.String("date", dateStr),
 			zap.Int("count", len(transactions)),
@@ -256,14 +264,14 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 
 		idStr := r.PathValue("id")
-		logger.Info("Mendapatkan id transaction", zap.String("id", idStr))
+		h.logger.Info("Mendapatkan id transaction", zap.String("id", idStr))
 
 		_, err := uuid.Parse(idStr)
 		if err != nil {
-			logger.Error("Invalid UUID format", zap.String("id", idStr), zap.Error(err))
+			h.logger.Error("Invalid UUID format", zap.String("id", idStr), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
 			return
@@ -271,7 +279,7 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 
 		key := "transaction_detail"
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_TRANSACTION_ID, idStr)
-		logger.Info("Checking cache", zap.String("key", cacheKey), zap.String("id", idStr))
+		h.logger.Info("Checking cache", zap.String("key", cacheKey), zap.String("id", idStr))
 
 		cacheCtx, cacheSpan := tracer.Start(ctx, "Cache-Lookup")
 		cacheStart := time.Now()
@@ -297,7 +305,7 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 				var transaction models.Transaction
 				if err := json.Unmarshal(decompressed, &transaction); err == nil {
 					span.AddEvent("Cache hit occurred")
-					logger.Info("Cache Hit - Berhasil mengambil data transaksi",
+					h.logger.Info("Cache Hit - Berhasil mengambil data transaksi",
 						zap.String("source", "redis"),
 						zap.String("id", idStr),
 					)
@@ -313,14 +321,14 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 		}
 
 		span.AddEvent("Cache miss")
-		logger.Info("Cache miss", zap.String("key", cacheKey), zap.String("id", idStr))
+		h.logger.Info("Cache miss", zap.String("key", cacheKey), zap.String("id", idStr))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
 		transaction, err := h.svc.FetchTransactionById(dbCtx, idStr)
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -332,12 +340,12 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 
 		cacheSetStart := time.Now()
 		if err := helper.SaveToCacheCompressed(ctx, h.rdb, cacheKey, transaction); err != nil {
-			logger.Warn("Failed to save to cache", zap.Error(err))
+			h.logger.Warn("Failed to save to cache", zap.Error(err))
 		}
 		metrics.CacheDuration.WithLabelValues("set", key).
 			Observe(time.Since(cacheSetStart).Seconds())
 
-		logger.Info("Berhasil mengambil data transaksi",
+		h.logger.Info("Berhasil mengambil data transaksi",
 			zap.String("source", "database"),
 			zap.String("id", idStr),
 		)
@@ -353,25 +361,25 @@ func (h *TransactionsHandler) Create() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
-		span, logger, tracer := middleware.AllCtx(ctx)
+		span, tracer := middleware.AllCtx(ctx)
 		key := "transaction_list"
 
 		var payload models.Transaction
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
 			return
 		}
 
-		logger.Info("Payload received", zap.Any("payload", payload))
+		h.logger.Info("Payload received", zap.Any("payload", payload))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Create-Transaction")
 		transactionID, err := h.svc.CreateTrx(dbCtx, payload)
 		dbSpan.End()
 
 		if err != nil {
-			logger.Error(err.Error(), zap.Error(err))
+			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
 			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
 			return
@@ -384,7 +392,7 @@ func (h *TransactionsHandler) Create() http.HandlerFunc {
 			metrics.CacheRequestsTotal.WithLabelValues(key, "error").Inc()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
-			logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
+			h.logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
 		} else {
 			metrics.CacheRequestsTotal.WithLabelValues(key, "invalidate").Inc()
 			span.AddEvent("Cache Invalidated")
@@ -399,16 +407,16 @@ func (h *TransactionsHandler) Create() http.HandlerFunc {
 		if errScan == nil && len(summaryKeys) > 0 {
 			if err := h.rdb.Del(ctx, summaryKeys...).Err(); err != nil {
 				span.RecordError(err)
-				logger.Warn("Failed to invalidate summary cache", zap.Error(err))
+				h.logger.Warn("Failed to invalidate summary cache", zap.Error(err))
 			} else {
 				span.AddEvent("Summary Cache Invalidated")
-				logger.Info("Summary cache invalidated", zap.Strings("keys", summaryKeys))
+				h.logger.Info("Summary cache invalidated", zap.Strings("keys", summaryKeys))
 			}
 		}
 
 		span.SetAttributes(attribute.String("handler.result.id", transactionID))
 
-		logger.Info("Transfer berhasil dilakukan",
+		h.logger.Info("Transfer berhasil dilakukan",
 			zap.String("source", "database"),
 			zap.String("handler.result.id", transactionID),
 		)

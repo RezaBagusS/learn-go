@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
@@ -25,11 +26,17 @@ type TransactionRepository interface {
 }
 
 type transactionRepository struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	logger *zap.Logger
 }
 
 func NewtransactionRepository(db *sqlx.DB) TransactionRepository {
-	return &transactionRepository{db: db}
+	logger := helper.Log
+
+	return &transactionRepository{
+		db:     db,
+		logger: logger,
+	}
 }
 
 const repoTransaction = "transaction"
@@ -37,7 +44,7 @@ const repoTransaction = "transaction"
 // Get All
 func (r *transactionRepository) GetAllTransactions(ctx context.Context) ([]models.Transaction, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "TransactionRepo.GetAll")
 	defer span.End()
 	operation := "select"
@@ -52,7 +59,7 @@ func (r *transactionRepository) GetAllTransactions(ctx context.Context) ([]model
 		attribute.String("db.table", "transactions"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT transactions"),
 	)
 
@@ -67,7 +74,7 @@ func (r *transactionRepository) GetAllTransactions(ctx context.Context) ([]model
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseIssue
@@ -79,7 +86,7 @@ func (r *transactionRepository) GetAllTransactions(ctx context.Context) ([]model
 
 	span.SetAttributes(attribute.Int("db.result.count", len(transactions)))
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.Int("rows", len(transactions)),
 	)
 
@@ -91,7 +98,7 @@ func (r *transactionRepository) GetAllTransactions(ctx context.Context) ([]model
 // Get Transaction on today
 func (r *transactionRepository) GetSummary(ctx context.Context, date time.Time) ([]models.Transaction, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "TransactionRepo.GetSummary")
 	defer span.End()
 	operation := "select"
@@ -108,7 +115,7 @@ func (r *transactionRepository) GetSummary(ctx context.Context, date time.Time) 
 		attribute.String("db.query.date", date.Format("2006-01-02")),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT transactions by date"),
 		zap.String("date", date.Format("2006-01-02")),
 	)
@@ -124,7 +131,7 @@ func (r *transactionRepository) GetSummary(ctx context.Context, date time.Time) 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseFailed
@@ -136,7 +143,7 @@ func (r *transactionRepository) GetSummary(ctx context.Context, date time.Time) 
 
 	span.SetAttributes(attribute.Int("db.result.count", len(transactions)))
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("date", date.Format("2006-01-02")),
 		zap.Int("rows", len(transactions)),
 	)
@@ -149,7 +156,7 @@ func (r *transactionRepository) GetSummary(ctx context.Context, date time.Time) 
 // Get Transaction By ID
 func (r *transactionRepository) GetTransactionById(ctx context.Context, id string) (*models.Transaction, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "TransactionRepo.GetById")
 	defer span.End()
 	operation := "select"
@@ -163,7 +170,7 @@ func (r *transactionRepository) GetTransactionById(ctx context.Context, id strin
 		attribute.String("db.query.id", id),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT transaction by id"),
 		zap.String("id", id),
 	)
@@ -180,7 +187,7 @@ func (r *transactionRepository) GetTransactionById(ctx context.Context, id strin
 			span.RecordError(models.ErrIdNotFound)
 			span.SetStatus(codes.Error, models.ErrIdNotFound.Error())
 
-			logger.Error("transaction not found", zap.String("id", id))
+			r.logger.Error("transaction not found", zap.String("id", id))
 			metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 
 			return nil, models.ErrIdNotFound
@@ -189,7 +196,7 @@ func (r *transactionRepository) GetTransactionById(ctx context.Context, id strin
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseIssue
@@ -197,7 +204,7 @@ func (r *transactionRepository) GetTransactionById(ctx context.Context, id strin
 
 	span.SetAttributes(attribute.String("db.result.id", id))
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("id", id),
 	)
 
@@ -209,7 +216,7 @@ func (r *transactionRepository) GetTransactionById(ctx context.Context, id strin
 // Post Create transaction
 func (r *transactionRepository) CreateTransaction(ctx context.Context, trx models.Transaction) (string, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "TransactionRepo.Create")
 	defer span.End()
 	operation := "insert"
@@ -221,12 +228,12 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	)
 
 	// START TRX
-	logger.Info("starting database transaction")
+	r.logger.Info("starting database transaction")
 	tx, err := r.db.Beginx()
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrDatabaseTrx.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseTrx.Error(), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrDatabaseTrx
 	}
@@ -235,7 +242,7 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	defer tx.Rollback()
 
 	// Check Sender
-	logger.Info("checking sender account", zap.String("from_account_id", trx.FromAccountID))
+	r.logger.Info("checking sender account", zap.String("from_account_id", trx.FromAccountID))
 	var senderBalance int64
 	var fromBankCode string
 
@@ -244,7 +251,7 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrInvalidTrxAccount.Error(), zap.String("from_account_id", trx.FromAccountID), zap.Error(err))
+		r.logger.Error(models.ErrInvalidTrxAccount.Error(), zap.String("from_account_id", trx.FromAccountID), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrInvalidTrxAccount
 	}
@@ -252,7 +259,7 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	if senderBalance < trx.Amount {
 		span.RecordError(models.ErrLogicBalanceTrx)
 		span.SetStatus(codes.Error, models.ErrLogicBalanceTrx.Error())
-		logger.Error(models.ErrLogicBalanceTrx.Error(),
+		r.logger.Error(models.ErrLogicBalanceTrx.Error(),
 			zap.Int64("balance", senderBalance),
 			zap.Int64("amount", trx.Amount),
 		)
@@ -261,7 +268,7 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	}
 
 	// Check Receiver
-	logger.Info("checking receiver account", zap.String("to_account_id", trx.ToAccountID))
+	r.logger.Info("checking receiver account", zap.String("to_account_id", trx.ToAccountID))
 	var receiverID string
 	var toBankCode string
 
@@ -270,7 +277,7 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrInvalidTrxAccount.Error(), zap.String("to_account_id", trx.ToAccountID), zap.Error(err))
+		r.logger.Error(models.ErrInvalidTrxAccount.Error(), zap.String("to_account_id", trx.ToAccountID), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrInvalidTrxAccount
 	}
@@ -280,29 +287,29 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	trx.ToBankCode = toBankCode
 
 	// Sender Mutation
-	logger.Info("mutating sender balance", zap.String("from_account_id", trx.FromAccountID))
+	r.logger.Info("mutating sender balance", zap.String("from_account_id", trx.FromAccountID))
 	_, err = tx.Exec("UPDATE accounts SET balance = balance - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", trx.Amount, trx.FromAccountID)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrLogicMutationTrx.Error(), zap.String("from_account_id", trx.FromAccountID), zap.Error(err))
+		r.logger.Error(models.ErrLogicMutationTrx.Error(), zap.String("from_account_id", trx.FromAccountID), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrLogicMutationTrx
 	}
 
 	// Receiver Mutation
-	logger.Info("mutating receiver balance", zap.String("to_account_id", trx.ToAccountID))
+	r.logger.Info("mutating receiver balance", zap.String("to_account_id", trx.ToAccountID))
 	_, err = tx.Exec("UPDATE accounts SET balance = balance + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", trx.Amount, trx.ToAccountID)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrLogicMutationTrx.Error(), zap.String("to_account_id", trx.ToAccountID), zap.Error(err))
+		r.logger.Error(models.ErrLogicMutationTrx.Error(), zap.String("to_account_id", trx.ToAccountID), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrLogicMutationTrx
 	}
 
 	// Push History Trx
-	logger.Info("inserting transaction history")
+	r.logger.Info("inserting transaction history")
 	var insertedID string
 	queryInsert := `
 		INSERT INTO transactions (from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note)
@@ -322,17 +329,17 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrDatabaseFailed
 	}
 
 	// Commit
-	logger.Info("committing database transaction")
+	r.logger.Info("committing database transaction")
 	if err = tx.Commit(); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		logger.Error(models.ErrLogicCommitTrx.Error(), zap.Error(err))
+		r.logger.Error(models.ErrLogicCommitTrx.Error(), zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoTransaction, operation, "error").Inc()
 		return "", models.ErrLogicCommitTrx
 	}
@@ -341,7 +348,7 @@ func (r *transactionRepository) CreateTransaction(ctx context.Context, trx model
 		attribute.String("db.result.id", insertedID),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.id", insertedID),
 	)
 

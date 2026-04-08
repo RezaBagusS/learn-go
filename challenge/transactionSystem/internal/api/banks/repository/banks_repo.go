@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
@@ -27,11 +28,17 @@ type BankRepository interface {
 }
 
 type bankRepository struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	logger *zap.Logger
 }
 
 func NewBankRepository(db *sqlx.DB) BankRepository {
-	return &bankRepository{db: db}
+	logger := helper.Log
+
+	return &bankRepository{
+		db:     db,
+		logger: logger,
+	}
 }
 
 const repoBank = "bank"
@@ -39,7 +46,7 @@ const repoBank = "bank"
 // Get All
 func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.GetAll")
 	defer span.End()
 	operation := "select"
@@ -52,7 +59,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 		attribute.String("db.table", "banks"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT banks"),
 	)
 
@@ -67,7 +74,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseIssue
@@ -75,7 +82,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 
 	span.SetAttributes(attribute.Int("db.result.count", len(banks)))
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.Int("rows", len(banks)),
 	)
 
@@ -87,7 +94,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 // Get Bank by Bank Id
 func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Bank, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.GetById")
 	defer span.End()
 	operation := "select_by_id"
@@ -100,7 +107,7 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 		attribute.String("db.table", "banks"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT banks"),
 	)
 
@@ -118,11 +125,11 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
 		if errors.Is(err, sql.ErrNoRows) {
-			logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
+			r.logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
 			return nil, models.ErrIdNotFound
 		}
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 
 		return nil, models.ErrDatabaseIssue
 	}
@@ -131,7 +138,7 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 		attribute.String("db.result.id", bank.ID.String()),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.id", bank.ID.String()),
 	)
 
@@ -143,7 +150,7 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 // Post Create New Bank
 func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (string, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.Create")
 	defer span.End()
 	operation := "insert"
@@ -156,7 +163,7 @@ func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (stri
 		attribute.String("db.table", "banks"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "INSERT banks"),
 	)
 
@@ -174,12 +181,12 @@ func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (stri
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				logger.Error(models.ErrDuplicateBank.Error(), zap.Error(err))
+				r.logger.Error(models.ErrDuplicateBank.Error(), zap.Error(err))
 				return "", models.ErrDuplicateBank
 			}
 		}
 
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 
 		return "", models.ErrDatabaseFailed
 	}
@@ -188,7 +195,7 @@ func (r *bankRepository) CreateBank(ctx context.Context, bank models.Bank) (stri
 		attribute.String("db.result.id", newId),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.id", newId),
 	)
 
@@ -204,7 +211,7 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 	idx := 1
 	operation := "update"
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.Update")
 	defer span.End()
 
@@ -237,7 +244,7 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 	)
 
 	// Query Execution
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "UPDATE banks"),
 	)
 
@@ -255,12 +262,12 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				logger.Error(models.ErrDuplicateBank.Error(), zap.Error(err))
+				r.logger.Error(models.ErrDuplicateBank.Error(), zap.Error(err))
 				return "", models.ErrDuplicateBank
 			}
 		}
 
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
 
@@ -268,13 +275,13 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
-		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return "", models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
-		logger.Error(models.ErrIdNotFound.Error())
+		r.logger.Error(models.ErrIdNotFound.Error())
 		return "", models.ErrIdNotFound
 	}
 
@@ -282,7 +289,7 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 		attribute.String("db.result.bankCode", bank.BankCode),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.bankCode", bank.BankCode),
 	)
 
@@ -294,7 +301,7 @@ func (r *bankRepository) UpdateBank(ctx context.Context, bank models.Bank) (stri
 // Method Delete
 func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.Delete")
 	defer span.End()
 	operation := "delete"
@@ -308,7 +315,7 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 	query := `DELETE FROM banks WHERE id = $1`
 
 	// Query Execution
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "DELETE banks"),
 	)
 
@@ -323,7 +330,7 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 		span.SetStatus(codes.Error, err.Error())
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
 
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return models.ErrDeleteFailed
 	}
 
@@ -331,13 +338,13 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
-		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
 		metrics.DBQueryTotal.WithLabelValues(repoBank, operation, "error").Inc()
-		logger.Error(models.ErrIdNotFound.Error())
+		r.logger.Error(models.ErrIdNotFound.Error())
 		return models.ErrIdNotFound
 	}
 
@@ -345,7 +352,7 @@ func (r *bankRepository) DeleteBank(ctx context.Context, bankId string) error {
 		attribute.String("db.delete.id", bankId),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.delete.id", bankId),
 	)
 

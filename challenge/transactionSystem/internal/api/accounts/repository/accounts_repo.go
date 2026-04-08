@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
@@ -30,11 +31,17 @@ type AccountRepository interface {
 }
 
 type accountRepository struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	logger *zap.Logger
 }
 
 func NewAccountRepository(db *sqlx.DB) AccountRepository {
-	return &accountRepository{db: db}
+	logger := helper.Log
+
+	return &accountRepository{
+		db:     db,
+		logger: logger,
+	}
 }
 
 const repoAccount = "account"
@@ -42,7 +49,7 @@ const repoAccount = "account"
 // Get All
 func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Account, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.GetAll")
 	defer span.End()
 	operation := "select"
@@ -56,7 +63,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 		attribute.String("db.table", "accounts"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT accounts"),
 	)
 
@@ -71,7 +78,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		return nil, models.ErrDatabaseIssue
@@ -79,7 +86,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 
 	span.SetAttributes(attribute.Int("db.result.count", len(accounts)))
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.Int("rows", len(accounts)),
 	)
 
@@ -89,7 +96,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 // Get Account By ID
 func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*models.Account, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.GetById")
 	defer span.End()
 	operation := "select_by_id"
@@ -102,7 +109,7 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 		attribute.String("db.table", "accounts"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT accounts"),
 		zap.String("account.id", id),
 	)
@@ -120,11 +127,11 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		if errors.Is(err, sql.ErrNoRows) {
-			logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
+			r.logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
 			return nil, models.ErrIdNotFound
 		}
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		return nil, models.ErrDatabaseIssue
 	}
 
@@ -132,7 +139,7 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 		attribute.String("db.result.id", account.ID.String()),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.id", account.ID.String()),
 	)
 
@@ -144,7 +151,7 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 // Get Transaction by Account Id
 func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.GetTransactionsByAccountId")
 	defer span.End()
 	operation := "select_transactions_by_account"
@@ -177,7 +184,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		logTrxType = "all"
 	}
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "SELECT transactions"),
 		zap.String("account.id", id),
 		zap.String("trx.type", logTrxType),
@@ -200,7 +207,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		span.SetStatus(codes.Error, err.Error())
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
-		logger.Error("query failed", zap.Error(err))
+		r.logger.Error("query failed", zap.Error(err))
 		return nil, models.ErrDatabaseIssue
 	}
 
@@ -212,7 +219,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		attribute.Int("db.result.count", len(transactions)),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("account.id", id),
 		zap.String("trx.type", logTrxType),
 		zap.Int("count", len(transactions)),
@@ -226,7 +233,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 // Post Create New Account
 func (r *accountRepository) CreateAccount(ctx context.Context, account models.Account) (string, error) {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.Create")
 	defer span.End()
 	operation := "insert"
@@ -239,7 +246,7 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 		attribute.String("db.table", "accounts"),
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "INSERT accounts"),
 	)
 
@@ -257,12 +264,12 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
+				r.logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
 				return "", models.ErrDuplicateAccount
 			}
 		}
 
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
 
@@ -270,7 +277,7 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 		attribute.String("db.result.id", newId),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.id", newId),
 	)
 
@@ -286,7 +293,7 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 	idx := 1
 	operation := "update"
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.Update")
 	defer span.End()
 
@@ -323,7 +330,7 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 		idx,
 	)
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "UPDATE accounts"),
 	)
 
@@ -340,12 +347,12 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 		if pqErr, ok := err.(*pq.Error); ok {
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
-				logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
+				r.logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
 				return "", models.ErrDuplicateAccount
 			}
 		}
 
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return "", models.ErrDatabaseFailed
 	}
 
@@ -353,13 +360,13 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
-		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return "", models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
-		logger.Error(models.ErrIdNotFound.Error())
+		r.logger.Error(models.ErrIdNotFound.Error())
 		return "", models.ErrIdNotFound
 	}
 
@@ -367,7 +374,7 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 		attribute.String("db.result.id", account.ID.String()),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.result.id", account.ID.String()),
 	)
 
@@ -379,7 +386,7 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 // Method Delete
 func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error {
 
-	_, logger, tracer := middleware.AllCtx(ctx)
+	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.Delete")
 	defer span.End()
 	operation := "delete"
@@ -392,7 +399,7 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error 
 
 	query := `DELETE FROM accounts WHERE id = $1`
 
-	logger.Info("executing query",
+	r.logger.Info("executing query",
 		zap.String("query", "DELETE accounts"),
 	)
 
@@ -406,7 +413,7 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error 
 		span.SetStatus(codes.Error, err.Error())
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
-		logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
 		return models.ErrDeleteFailed
 	}
 
@@ -414,13 +421,13 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
-		logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
+		r.logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
 		return models.ErrDatabaseIssue
 	}
 
 	if rowsAffected == 0 {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
-		logger.Error(models.ErrIdNotFound.Error())
+		r.logger.Error(models.ErrIdNotFound.Error())
 		return models.ErrIdNotFound
 	}
 
@@ -428,7 +435,7 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error 
 		attribute.String("db.delete.id", id),
 	)
 
-	logger.Info("query success",
+	r.logger.Info("query success",
 		zap.String("db.delete.id", id),
 	)
 

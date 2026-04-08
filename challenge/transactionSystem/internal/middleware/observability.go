@@ -46,7 +46,6 @@ func (m *ObservabilityMiddleware) Wrap(spanName, module string, next http.Handle
 		)
 
 		ctx = WithSpan(ctx, span)
-		ctx = WithLogger(ctx, logger)
 		ctx = WithTracer(ctx, m.tracer)
 
 		rw := newResponseWriter(w)
