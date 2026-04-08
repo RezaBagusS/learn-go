@@ -90,7 +90,7 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
 
@@ -102,7 +102,7 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 		zap.String("service.result.id", account.ID.String()),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
 
 	return account, nil
 }
@@ -126,11 +126,11 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
 
 	logger.Info("fetching trx account from repository")
 
@@ -142,7 +142,7 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operationTrx, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationTrx, "error").Inc()
 		return nil, err
 	}
 
@@ -154,7 +154,7 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 		zap.Int("service.result.count", len(transactions)),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operationTrx, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationTrx, "success").Inc()
 
 	return transactions, nil
 }
@@ -174,7 +174,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		span.RecordError(models.ErrInvalidField)
 		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, models.ErrInvalidField
 	}
 
@@ -183,7 +183,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		span.RecordError(models.ErrInvalidInitBalance)
 		logger.Error(models.ErrInvalidInitBalance.Error(), zap.Error(models.ErrInvalidInitBalance))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, models.ErrInvalidInitBalance
 	}
 
@@ -191,30 +191,30 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 
 	svcStartCheckBank := time.Now()
 	_, err := s.bankSvc.FetchBankById(ctx, account.BankCode)
-	metrics.ServiceDuration.WithLabelValues(svcAccount).
+	metrics.ServiceDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStartCheckBank).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, err
 	}
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
 
 	logger.Info("creating new account")
 
 	// Simpan ke repository
 	svcStart := time.Now()
 	returnedId, err := s.repo.CreateAccount(ctx, account)
-	metrics.ServiceDuration.WithLabelValues(svcAccount).
+	metrics.ServiceDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStart).Seconds())
 
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operationCreate, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationCreate, "error").Inc()
 		return nil, err
 	}
 
@@ -228,7 +228,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		zap.String("service.result.id", returnedId),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operationCreate, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationCreate, "success").Inc()
 
 	return &account, nil
 }
@@ -298,7 +298,7 @@ func (s *accountsService) DeleteAccountById(ctx context.Context, id string) erro
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return err
 	}
 
@@ -310,7 +310,7 @@ func (s *accountsService) DeleteAccountById(ctx context.Context, id string) erro
 		zap.String("service.delete.id", id),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
 
 	return nil
 }

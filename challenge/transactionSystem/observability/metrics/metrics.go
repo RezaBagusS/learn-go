@@ -86,16 +86,15 @@ var (
 )
 
 func Init() {
-	prometheus.MustRegister(HTTPDuration)
-	prometheus.MustRegister(HTTPRequestTotal)
-
-	prometheus.MustRegister(CacheRequestsTotal)
-	prometheus.MustRegister(CacheDuration)
-
-	prometheus.MustRegister(ServiceRequestsTotal)
-	prometheus.MustRegister(ServiceDuration)
-	prometheus.MustRegister(BusinessValidationErrors)
-
-	prometheus.MustRegister(DBQueryDuration)
-	prometheus.MustRegister(DBQueryTotal)
+	prometheus.MustRegister(
+		HTTPDuration,
+		HTTPRequestTotal,
+		CacheRequestsTotal,
+		CacheDuration,
+		ServiceRequestsTotal,
+		ServiceDuration,
+		BusinessValidationErrors,
+		DBQueryDuration,
+		DBQueryTotal,
+	)
 }

@@ -255,6 +255,7 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 
 		ctx := r.Context()
 		span, logger, tracer := middleware.AllCtx(ctx)
+		// idempotencyKey := r.Header.Get("X-Idempotency-Key")
 
 		var payload models.Bank
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {

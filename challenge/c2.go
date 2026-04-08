@@ -37,8 +37,10 @@ func Challenge2() {
 	if err != nil {
 		log.Fatalln("Error saat inisialisasi aplikasi:", err)
 	}
-
 	defer db.Close()
+
+	// Run Migrations
+	config.RunMigrations(db.DB)
 
 	// Init Context Time Out
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

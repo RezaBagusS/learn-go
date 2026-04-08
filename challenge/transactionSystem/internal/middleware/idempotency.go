@@ -28,7 +28,7 @@ func (m *IdempotencyMiddleware) Check(next http.HandlerFunc) http.HandlerFunc {
 
 		if idempotencyKey != "" {
 			ctx := r.Context()
-			lockKey := m.keyManager.Generate("idempotency:" + strings.ToLower(idempotencyKey))
+			lockKey := m.keyManager.Generate("idempotency:", strings.ToLower(idempotencyKey))
 
 			_, err := m.rdb.SetArgs(ctx, lockKey, "processing", redis.SetArgs{
 				Mode: "NX",

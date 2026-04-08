@@ -43,7 +43,7 @@ const repoAccount = "account"
 func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Account, error) {
 
 	_, logger, tracer := middleware.AllCtx(ctx)
-	ctx, span := tracer.Start(ctx, "BankRepo.GetAll")
+	ctx, span := tracer.Start(ctx, "AccountRepo.GetAll")
 	defer span.End()
 	operation := "select"
 

@@ -8,9 +8,13 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
     ports:
       - "${DB_PORT}:5432"
     networks:
@@ -34,9 +38,15 @@ services:
     ports:
       - "${APP_PORT}:8080"
     depends_on:
-      - db
-      - redis
-      - tempo
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      tempo:
+        condition: service_started
+    volumes:
+      - .:/app
+      - ./migrations:/app/migrations
     environment:
       APP_ADDR: "0.0.0.0"
       APP_PORT: ${APP_PORT}
@@ -50,6 +60,7 @@ services:
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      MIGRATIONS_PATH: "file:///root/migrations"
     networks:
       - transaction_net
 
@@ -100,7 +111,7 @@ services:
     ports:
       - "3001:3000"
     volumes:
-    - ./etc/grafana:/etc/grafana/provisioning
+      - ./etc/grafana:/etc/grafana/provisioning
     depends_on:
       - prometheus
       - tempo

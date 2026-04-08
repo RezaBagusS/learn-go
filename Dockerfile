@@ -21,7 +21,9 @@ WORKDIR /root/
 # Copy dari build -> main
 COPY --from=builder /app/main .
 # Copy env
-COPY .env . 
+COPY .env .
+# Copy migrations
+COPY --from=builder /app/migrations ./migrations  
 
 # Port 
 EXPOSE 8080

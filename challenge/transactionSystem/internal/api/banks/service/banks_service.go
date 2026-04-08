@@ -84,7 +84,7 @@ func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Ban
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, err
 	}
 
@@ -96,7 +96,7 @@ func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Ban
 		zap.String("service.result.id", bank.ID.String()),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return bank, nil
 }
@@ -116,7 +116,7 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 		span.RecordError(models.ErrInvalidField)
 		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcBank, operation).Inc()
-		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, models.ErrInvalidField
 	}
 
@@ -130,7 +130,7 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return nil, err
 	}
 
@@ -144,7 +144,7 @@ func (s *bankService) CreateNewBank(ctx context.Context, bank models.Bank) (*mod
 		zap.String("service.result.id", bank.ID.String()),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return &bank, nil
 }
@@ -160,7 +160,7 @@ func (s *bankService) PatchBank(ctx context.Context, bank models.Bank) (string, 
 	logger.Info("checking payload")
 
 	// Logika Bisnis: Validasi input tidak boleh kosong
-	if bank.ID == uuid.Nil || bank.BankCode == "" || bank.BankName == "" {
+	if bank.ID == uuid.Nil || bank.BankCode == "" && bank.BankName == "" {
 		span.RecordError(models.ErrInvalidField)
 		logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcBank, operation).Inc()
@@ -215,7 +215,7 @@ func (s *bankService) DeleteBank(ctx context.Context, bankId string) error {
 	if err != nil {
 		span.RecordError(err)
 		logger.Error(err.Error(), zap.Error(err))
-		metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
+		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
 		return err
 	}
 
@@ -227,7 +227,7 @@ func (s *bankService) DeleteBank(ctx context.Context, bankId string) error {
 		zap.String("service.delete.id", bankId),
 	)
 
-	metrics.CacheRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
+	metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "success").Inc()
 
 	return nil
 }
