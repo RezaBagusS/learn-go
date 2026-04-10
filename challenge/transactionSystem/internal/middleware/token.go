@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +36,12 @@ func ValidateSNAPToken(next http.Handler) http.Handler {
 			span.SetStatus(codes.Error, models.ErrUnauthorized.Error())
 			span.SetAttributes(attribute.String("auth.error", "bearer_tidak_ada"))
 			metrics.CacheRequestsTotal.WithLabelValues("token", "unauthorized").Inc()
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrUnauthorized), models.ErrUnauthorized.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(models.ErrUnauthorized),
+				strconv.Itoa(http.StatusUnauthorized),
+				models.ErrUnauthorized.Error(),
+			)
 			return
 		}
 
@@ -78,7 +84,12 @@ func ValidateSNAPToken(next http.Handler) http.Handler {
 				zap.String("remote_addr", r.RemoteAddr),
 			)
 			metrics.CacheRequestsTotal.WithLabelValues("token", "tidak_valid").Inc()
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrUnauthorizedToken), models.ErrUnauthorizedToken.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidToken.HttpCode,
+				strconv.Itoa(models.SnapInvalidToken.HttpCode),
+				models.SnapInvalidToken.ResponseMessage,
+			)
 			return
 		}
 

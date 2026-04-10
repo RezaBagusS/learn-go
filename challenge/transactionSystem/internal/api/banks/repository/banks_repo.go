@@ -21,7 +21,7 @@ import (
 
 type BankRepository interface {
 	GetAllBanks(ctx context.Context) ([]models.Bank, error)
-	GetBankById(ctx context.Context, id string) (*models.Bank, error)
+	GetBankById(ctx context.Context, id string) (*models.Bank, *models.SnapDetail)
 	CreateBank(ctx context.Context, bank models.Bank) (string, error)
 	UpdateBank(ctx context.Context, bank models.Bank) (string, error)
 	DeleteBank(ctx context.Context, bankCode string) error
@@ -92,7 +92,7 @@ func (r *bankRepository) GetAllBanks(ctx context.Context) ([]models.Bank, error)
 }
 
 // Get Bank by Bank Id
-func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Bank, error) {
+func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Bank, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankRepo.GetById")
@@ -126,12 +126,12 @@ func (r *bankRepository) GetBankById(ctx context.Context, id string) (*models.Ba
 
 		if errors.Is(err, sql.ErrNoRows) {
 			r.logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
-			return nil, models.ErrIdNotFound
+			return nil, &models.SnapInvalidAccount
 		}
 
 		r.logger.Error("query failed", zap.Error(err))
 
-		return nil, models.ErrDatabaseIssue
+		return nil, &models.SnapInternalError
 	}
 
 	span.SetAttributes(

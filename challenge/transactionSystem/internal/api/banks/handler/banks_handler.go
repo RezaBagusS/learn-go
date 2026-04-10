@@ -10,8 +10,10 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -115,7 +117,15 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 						zap.String("source", "redis"),
 						zap.Int("count", len(banks)),
 					)
-					dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data bank", map[string]any{"banks": banks})
+					dto.WriteResponse(
+						w,
+						http.StatusOK,
+						strconv.Itoa(http.StatusOK),
+						"Berhasil mengambil list data bank",
+						map[string]any{
+							"banks": banks,
+						},
+					)
 					return
 				}
 			}
@@ -136,7 +146,11 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(err),
+				strconv.Itoa(models.StatusCodeHandler(err)),
+				err.Error())
 			return
 		}
 
@@ -154,9 +168,15 @@ func (h *BanksHandler) GetAll() http.HandlerFunc {
 			zap.Int("count", len(banks)),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data bank", map[string]any{
-			"banks": banks,
-		})
+		dto.WriteResponse(
+			w,
+			http.StatusOK,
+			strconv.Itoa(http.StatusOK),
+			"Berhasil mengambil list data bank",
+			map[string]any{
+				"banks": banks,
+			},
+		)
 	}
 }
 
@@ -207,9 +227,15 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 						zap.String("source", "redis"),
 						zap.String("handler.result.id", bank.ID.String()),
 					)
-					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan identifier = %s", idStr), map[string]any{
-						"bank": bank,
-					})
+					dto.WriteResponse(
+						w,
+						http.StatusOK,
+						strconv.Itoa(http.StatusOK),
+						fmt.Sprintf("Berhasil mengambil data bank dengan identifier = %s", idStr),
+						map[string]any{
+							"bank": bank,
+						},
+					)
 					return
 				}
 			}
@@ -224,13 +250,19 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
-		bank, err := h.svc.FetchBankById(dbCtx, idStr)
+		bank, snapErr := h.svc.FetchBankById(dbCtx, idStr)
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error(err.Error(), zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixErr := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixErr.Error(), zap.Error(prefixErr))
+			span.RecordError(prefixErr)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode("00"),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -248,9 +280,15 @@ func (h *BanksHandler) GetById() http.HandlerFunc {
 			zap.String("handler.result.id", bank.ID.String()),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data bank dengan identifier = %s", idStr), map[string]any{
-			"bank": bank,
-		})
+		dto.WriteResponse(
+			w,
+			http.StatusOK,
+			strconv.Itoa(http.StatusOK),
+			fmt.Sprintf("Berhasil mengambil data bank dengan identifier = %s", idStr),
+			map[string]any{
+				"bank": bank,
+			},
+		)
 	}
 }
 
@@ -266,7 +304,12 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(models.ErrInvalidJsonFormat),
+				strconv.Itoa(models.StatusCodeHandler(models.ErrInvalidJsonFormat)),
+				models.ErrInvalidJsonFormat.Error(),
+			)
 			return
 		}
 
@@ -279,7 +322,12 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(err),
+				strconv.Itoa(models.StatusCodeHandler(err)),
+				err.Error(),
+			)
 			return
 		}
 
@@ -305,9 +353,15 @@ func (h *BanksHandler) Create() http.HandlerFunc {
 			zap.String("handler.result.id", newBank.ID.String()),
 		)
 
-		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data bank baru", map[string]any{
-			"bank": newBank,
-		})
+		dto.WriteResponse(
+			w,
+			http.StatusCreated,
+			strconv.Itoa(http.StatusCreated),
+			"Berhasil membuat data bank baru",
+			map[string]any{
+				"bank": newBank,
+			},
+		)
 	}
 }
 
@@ -325,7 +379,12 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(models.ErrInvalidJsonFormat),
+				strconv.Itoa(models.StatusCodeHandler(models.ErrInvalidJsonFormat)),
+				models.ErrInvalidJsonFormat.Error(),
+			)
 			return
 		}
 
@@ -336,7 +395,12 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 			// Jika gagal di-parse, kembalikan error validasi
 			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(models.ErrInvalidUuid),
+				strconv.Itoa(models.StatusCodeHandler(models.ErrInvalidUuid)),
+				models.ErrInvalidUuid.Error(),
+			)
 			return
 		}
 
@@ -349,7 +413,12 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(err),
+				strconv.Itoa(models.StatusCodeHandler(err)),
+				err.Error(),
+			)
 			return
 		}
 
@@ -381,9 +450,13 @@ func (h *BanksHandler) Update() http.HandlerFunc {
 			zap.String("handler.result.bankCode", bankCode),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data bank", map[string]any{
-			"bank_code": bankCode,
-		})
+		dto.WriteResponse(
+			w,
+			http.StatusOK,
+			strconv.Itoa(http.StatusOK),
+			"Berhasil mengupdate data bank", map[string]any{
+				"bank_code": bankCode,
+			})
 	}
 }
 
@@ -401,7 +474,11 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 		if errId != nil {
 			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(errId))
 			span.RecordError(errId)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(models.ErrInvalidUuid),
+				strconv.Itoa(models.StatusCodeHandler(models.ErrInvalidUuid)),
+				models.ErrInvalidUuid.Error())
 			return
 		}
 
@@ -412,7 +489,12 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(err),
+				strconv.Itoa(models.StatusCodeHandler(err)),
+				err.Error(),
+			)
 			return
 		}
 
@@ -443,8 +525,13 @@ func (h *BanksHandler) Delete() http.HandlerFunc {
 			zap.String("handler.delete.id", bankIdParse.String()),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil menghapus bank : %s", bankId), map[string]any{
-			"id": bankIdParse.String(),
-		})
+		dto.WriteResponse(
+			w,
+			http.StatusOK,
+			strconv.Itoa(http.StatusOK),
+			fmt.Sprintf("Berhasil menghapus bank : %s", bankId),
+			map[string]any{
+				"id": bankIdParse.String(),
+			})
 	}
 }

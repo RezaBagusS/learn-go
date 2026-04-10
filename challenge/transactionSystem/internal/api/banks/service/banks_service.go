@@ -7,6 +7,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,7 +17,7 @@ import (
 
 type BankService interface {
 	FetchAllBanks(ctx context.Context) ([]models.Bank, error)
-	FetchBankById(ctx context.Context, id string) (*models.Bank, error)
+	FetchBankById(ctx context.Context, id string) (*models.Bank, *models.SnapDetail)
 	CreateNewBank(ctx context.Context, bank models.Bank) (*models.Bank, error)
 	PatchBank(ctx context.Context, bank models.Bank) (string, error)
 	DeleteBank(ctx context.Context, bankCode string) error
@@ -74,7 +75,7 @@ func (s *bankService) FetchAllBanks(ctx context.Context) ([]models.Bank, error) 
 }
 
 // Fetch Bank by code
-func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Bank, error) {
+func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Bank, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "BankService.GetById")
@@ -84,15 +85,16 @@ func (s *bankService) FetchBankById(ctx context.Context, id string) (*models.Ban
 	s.logger.Info("fetching bank from repository")
 
 	svcStart := time.Now()
-	bank, err := s.repo.GetBankById(ctx, id)
+	bank, snapErr := s.repo.GetBankById(ctx, id)
 	metrics.CacheDuration.WithLabelValues(svcBank, operation).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(prefix.Error(), zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcBank, operation, "error").Inc()
-		return nil, err
+		return nil, snapErr
 	}
 
 	span.SetAttributes(

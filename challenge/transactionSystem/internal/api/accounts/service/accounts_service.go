@@ -8,6 +8,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,12 +17,12 @@ import (
 )
 
 type AccountsService interface {
-	FetchAllAccounts(ctx context.Context) ([]models.Account, error)
-	FetchAccountById(ctx context.Context, id string) (*models.Account, error)
-	FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error)
-	CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, error)
-	PatchAccountById(ctx context.Context, account models.Account) (string, error)
-	DeleteAccountById(ctx context.Context, id string) error
+	FetchAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail)
+	FetchAccountById(ctx context.Context, id string) (*models.Account, *models.SnapDetail)
+	FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail)
+	CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, *models.SnapDetail)
+	PatchAccountById(ctx context.Context, account models.Account) (string, *models.SnapDetail)
+	DeleteAccountById(ctx context.Context, id string) *models.SnapDetail
 }
 
 type accountsService struct {
@@ -43,7 +44,7 @@ func NewAccountsService(repo repository.AccountRepository, bankSvc service.BankS
 const svcAccount = "account"
 
 // Fetch All Data
-func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Account, error) {
+func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.GetAll")
@@ -53,15 +54,16 @@ func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Accoun
 	s.logger.Info("fetching accounts from repository")
 
 	svcStart := time.Now()
-	accounts, err := s.repo.GetAllAccounts(ctx)
+	accounts, snapErr := s.repo.GetAllAccounts(ctx)
 	metrics.ServiceDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error("failed fetching accounts", zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error("failed fetching accounts", zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, err
+		return nil, snapErr
 	}
 
 	span.SetAttributes(
@@ -78,7 +80,7 @@ func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Accoun
 }
 
 // Fetch Account by Id
-func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*models.Account, error) {
+func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*models.Account, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.GetById")
@@ -88,15 +90,16 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 	s.logger.Info("fetching account from repository")
 
 	svcStart := time.Now()
-	account, err := s.repo.GetAccountById(ctx, id)
+	account, snapErr := s.repo.GetAccountById(ctx, id)
 	metrics.CacheDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, err
+		return nil, snapErr
 	}
 
 	span.SetAttributes(
@@ -113,7 +116,7 @@ func (s *accountsService) FetchAccountById(ctx context.Context, id string) (*mod
 }
 
 // Fetch Transaction by Account Id
-func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error) {
+func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.GetTrxById")
@@ -124,15 +127,16 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 	s.logger.Info("checking valid accound id")
 
 	svcStart := time.Now()
-	_, err := s.repo.GetAccountById(ctx, id)
+	_, snapErr := s.repo.GetAccountById(ctx, id)
 	metrics.CacheDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, err
+		return nil, snapErr
 	}
 
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
@@ -140,15 +144,16 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 	s.logger.Info("fetching trx account from repository")
 
 	svcStartTrx := time.Now()
-	transactions, err := s.repo.GetTransactionsByAccountId(ctx, id, trxType)
+	transactions, snapErr := s.repo.GetTransactionsByAccountId(ctx, id, trxType)
 	metrics.CacheDuration.WithLabelValues(svcAccount, operationTrx).
 		Observe(time.Since(svcStartTrx).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
-		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationTrx, "error").Inc()
-		return nil, err
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
+		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+		return nil, snapErr
 	}
 
 	span.SetAttributes(
@@ -165,7 +170,7 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 }
 
 // Create new account
-func (s *accountsService) CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, error) {
+func (s *accountsService) CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Create")
@@ -180,7 +185,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		s.logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, models.ErrInvalidField
+		return nil, &models.SnapMandatoryField
 	}
 
 	// Balance checking ...
@@ -189,21 +194,22 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		s.logger.Error(models.ErrInvalidInitBalance.Error(), zap.Error(models.ErrInvalidInitBalance))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, models.ErrInvalidInitBalance
+		return nil, &models.SnapInvalidAmount
 	}
 
 	s.logger.Info("checking bank code")
 
 	svcStartCheckBank := time.Now()
-	_, err := s.bankSvc.FetchBankById(ctx, account.BankCode)
+	_, snapErr := s.bankSvc.FetchBankById(ctx, account.BankCode)
 	metrics.ServiceDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStartCheckBank).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, err
+		return nil, snapErr
 	}
 
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
@@ -212,15 +218,16 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 
 	// Simpan ke repository
 	svcStart := time.Now()
-	returnedId, err := s.repo.CreateAccount(ctx, account)
-	metrics.ServiceDuration.WithLabelValues(svcAccount, operation).
+	returnedId, snapErr := s.repo.CreateAccount(ctx, account)
+	metrics.ServiceDuration.WithLabelValues(svcAccount, operationCreate).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationCreate, "error").Inc()
-		return nil, err
+		return nil, snapErr
 	}
 
 	account.ID = uuid.MustParse(returnedId)
@@ -239,7 +246,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 }
 
 // Update account
-func (s *accountsService) PatchAccountById(ctx context.Context, account models.Account) (string, error) {
+func (s *accountsService) PatchAccountById(ctx context.Context, account models.Account) (string, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Update")
@@ -254,21 +261,22 @@ func (s *accountsService) PatchAccountById(ctx context.Context, account models.A
 		s.logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
 		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return "", models.ErrInvalidField
+		return "", &models.SnapMandatoryField
 	}
 
 	s.logger.Info("updating account data")
 
 	svcStart := time.Now()
-	getId, err := s.repo.UpdateAccount(ctx, account)
+	getId, snapErr := s.repo.UpdateAccount(ctx, account)
 	metrics.CacheDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return "", err
+		return "", snapErr
 	}
 
 	span.SetAttributes(
@@ -285,7 +293,7 @@ func (s *accountsService) PatchAccountById(ctx context.Context, account models.A
 }
 
 // Delete account
-func (s *accountsService) DeleteAccountById(ctx context.Context, id string) error {
+func (s *accountsService) DeleteAccountById(ctx context.Context, id string) *models.SnapDetail {
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Delete")
 	defer span.End()
@@ -296,15 +304,16 @@ func (s *accountsService) DeleteAccountById(ctx context.Context, id string) erro
 	)
 
 	svcStart := time.Now()
-	err := s.repo.DeleteAccount(ctx, id)
+	snapErr := s.repo.DeleteAccount(ctx, id)
 	metrics.CacheDuration.WithLabelValues(svcAccount, operation).
 		Observe(time.Since(svcStart).Seconds())
 
-	if err != nil {
-		span.RecordError(err)
-		s.logger.Error(err.Error(), zap.Error(err))
+	if snapErr != nil {
+		prefix := errors.New(snapErr.ResponseMessage)
+		span.RecordError(prefix)
+		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return err
+		return snapErr
 	}
 
 	span.SetAttributes(

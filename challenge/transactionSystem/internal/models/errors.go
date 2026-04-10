@@ -22,6 +22,7 @@ var (
 	ErrInvalidFutureDate    = errors.New("Tidak dapat mencari riwayat di masa depan")
 	ErrInvalidMaximumNote   = errors.New("Catatan transfer maksimal 255 karakter")
 	ErrInvalidTrxAccount    = errors.New("Rekening pengirim/penerima tidak valid")
+	ErrInvalidSnap          = errors.New("Header SNAP tidak lengkap")
 
 	ErrIdNotFound = errors.New("data tidak ditemukan")
 
@@ -48,7 +49,8 @@ func StatusCodeHandler(err error) int {
 		errors.Is(err, ErrInvalidJsonFormat), errors.Is(err, ErrInvalidTrxType),
 		errors.Is(err, ErrInvalidBankCode), errors.Is(err, ErrInvalidField),
 		errors.Is(err, ErrInvalidDate), errors.Is(err, ErrInvalidFutureDate),
-		errors.Is(err, ErrInvalidMaximumNote), errors.Is(err, ErrInvalidTrxAccount):
+		errors.Is(err, ErrInvalidMaximumNote), errors.Is(err, ErrInvalidTrxAccount),
+		errors.Is(err, ErrInvalidSnap), errors.Is(err, ErrInvalidTranserAmount):
 		statusCode = http.StatusBadRequest
 	case errors.Is(err, ErrDuplicateAccount), errors.Is(err, ErrDuplicateBank):
 		statusCode = http.StatusConflict

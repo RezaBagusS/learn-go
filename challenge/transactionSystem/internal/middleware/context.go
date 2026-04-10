@@ -27,7 +27,10 @@ func WithTracer(ctx context.Context, tracer trace.Tracer) context.Context {
 
 // Getter — dipanggil di handler
 func SpanFromCtx(ctx context.Context) trace.Span {
-	span, _ := ctx.Value(contextKeySpan).(trace.Span)
+	span, ok := ctx.Value(contextKeySpan).(trace.Span)
+	if !ok || span == nil {
+		return trace.SpanFromContext(ctx) // returns no-op span if none exists
+	}
 	return span
 }
 

@@ -9,6 +9,7 @@ import (
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -38,7 +39,7 @@ func (a *TokenHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
 	version := "v1.0"
 
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodGet, version, "/access-token"),
+		helper.NewAPIPath(http.MethodPost, version, "/access-token"),
 		obs.Wrap("Oauth.Get", config.DOMAIN_OAUTH, a.Get()).ServeHTTP,
 	)
 }
@@ -54,7 +55,13 @@ func (h *TokenHandler) Get() http.HandlerFunc {
 		accountId := r.Header.Get("X-ACCOUNT-ID")
 		if accountId == "" {
 			h.logger.Error("X-ACCOUNT-ID is required", zap.String("account.id", accountId))
-			dto.WriteResponse(w, http.StatusBadRequest, "X-ACCOUNT-ID header is required", nil)
+			dto.WriteResponse(
+				w,
+				http.StatusBadRequest,
+				strconv.Itoa(http.StatusBadRequest),
+				"X-ACCOUNT-ID header is required",
+				nil,
+			)
 			return
 		}
 
@@ -77,14 +84,26 @@ func (h *TokenHandler) Get() http.HandlerFunc {
 			decompressed, err := helper.DecompressData(val)
 			if err != nil {
 				h.logger.Error("Failed to decompress cache data", zap.Error(err))
-				dto.WriteResponse(w, http.StatusInternalServerError, "Gagal memproses data cache", nil)
+				dto.WriteResponse(
+					w,
+					http.StatusInternalServerError,
+					strconv.Itoa(http.StatusInternalServerError),
+					"Gagal memproses data cache",
+					nil,
+				)
 				return
 			}
 
 			var token string
 			if err := json.Unmarshal(decompressed, &token); err != nil {
 				h.logger.Error("Failed to unmarshal token from cache", zap.Error(err))
-				dto.WriteResponse(w, http.StatusInternalServerError, "Gagal memproses token dari cache", nil)
+				dto.WriteResponse(
+					w,
+					http.StatusInternalServerError,
+					strconv.Itoa(http.StatusInternalServerError),
+					"Gagal memproses token dari cache",
+					nil,
+				)
 				return
 			}
 
@@ -93,7 +112,13 @@ func (h *TokenHandler) Get() http.HandlerFunc {
 				zap.String("source", "redis"),
 				zap.String("account_id", accountId),
 			)
-			dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil access token", map[string]any{"token": token})
+			dto.WriteResponse(
+				w,
+				http.StatusOK,
+				strconv.Itoa(http.StatusOK),
+				"Berhasil mengambil access token",
+				map[string]any{"token": token},
+			)
 			return
 		}
 
@@ -105,7 +130,12 @@ func (h *TokenHandler) Get() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(err.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+			dto.WriteError(
+				w,
+				models.StatusCodeHandler(err),
+				strconv.Itoa(models.StatusCodeHandler(err)),
+				err.Error(),
+			)
 			return
 		}
 
@@ -121,6 +151,12 @@ func (h *TokenHandler) Get() http.HandlerFunc {
 			zap.String("result.key", token),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil access token", map[string]any{"token": token})
+		dto.WriteResponse(
+			w,
+			http.StatusOK,
+			strconv.Itoa(http.StatusOK),
+			"Berhasil mengambil access token",
+			map[string]any{"token": token},
+		)
 	}
 }

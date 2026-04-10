@@ -12,6 +12,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -56,7 +57,7 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *Acc
 
 func (a *AccountsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
 
-	version := "v1"
+	version := "v1.0"
 
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodGet, version, "/accounts"),
@@ -91,6 +92,7 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		ctx := r.Context()
 		span, tracer := middleware.AllCtx(ctx)
 		key := "account_list"
+		svcCode := config.SVC_CODE_ACCOUNT_INQUIRY
 
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
 		h.logger.Info("Checking cache", zap.String("key", cacheKey))
@@ -124,9 +126,15 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 						zap.String("source", "Redis"),
 						zap.Int("count", len(accounts)),
 					)
-					dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data account", map[string]any{
-						"accounts": accounts,
-					})
+					dto.WriteResponse(
+						w,
+						models.SnapSuccess.HttpCode,
+						models.SnapSuccess.GetResponseCode(svcCode),
+						models.SnapSuccess.ResponseMessage,
+						map[string]any{
+							"accounts": accounts,
+						},
+					)
 					return
 				}
 			}
@@ -141,13 +149,19 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-database")
-		accounts, err := h.svc.FetchAllAccounts(dbCtx)
+		accounts, snapErr := h.svc.FetchAllAccounts(dbCtx)
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error("Database fetch failed", zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixError := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
+			span.RecordError(prefixError)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode(svcCode),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -166,9 +180,15 @@ func (h *AccountsHandler) GetAll() http.HandlerFunc {
 			zap.Int("count", len(accounts)),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, "Berhasil mengambil list data akun", map[string]any{
-			"accounts": accounts,
-		})
+		dto.WriteResponse(
+			w,
+			models.SnapSuccess.HttpCode,
+			models.SnapSuccess.GetResponseCode(svcCode),
+			models.SnapSuccess.ResponseMessage,
+			map[string]any{
+				"accounts": accounts,
+			},
+		)
 	}
 }
 
@@ -179,6 +199,7 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		ctx := r.Context()
 		span, tracer := middleware.AllCtx(ctx)
 		key := "account_id"
+		svcCode := config.SVC_CODE_ACCOUNT_INQUIRY_INTERNAL
 
 		idStr := r.PathValue("id")
 		h.logger.Info("Path received", zap.String("handler.query", idStr))
@@ -187,7 +208,12 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.SnapInvalidFormat.ResponseMessage,
+			)
 			return
 		}
 
@@ -228,9 +254,15 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 						zap.String("source", "redis"),
 						zap.String("handler.result.id", account.ID.String()),
 					)
-					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", idParse), map[string]any{
-						"account": account,
-					})
+					dto.WriteResponse(
+						w,
+						models.SnapSuccess.HttpCode,
+						models.SnapSuccess.GetResponseCode(svcCode),
+						models.SnapSuccess.ResponseMessage,
+						map[string]any{
+							"account": account,
+						},
+					)
 					return
 				}
 			}
@@ -245,13 +277,19 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 		h.logger.Info("Cache miss", zap.String("key", cacheKey))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
-		account, err := h.svc.FetchAccountById(dbCtx, idParse.String())
+		account, snapErr := h.svc.FetchAccountById(dbCtx, idParse.String())
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error(err.Error(), zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixError := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
+			span.RecordError(prefixError)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode(svcCode),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -269,9 +307,15 @@ func (h *AccountsHandler) GetById() http.HandlerFunc {
 			zap.String("handler.result.id", account.ID.String()),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data akun dengan id = %s", account.ID), map[string]any{
-			"account": account,
-		})
+		dto.WriteResponse(
+			w,
+			models.SnapSuccess.HttpCode,
+			models.SnapSuccess.GetResponseCode(svcCode),
+			models.SnapSuccess.ResponseMessage,
+			map[string]any{
+				"account": account,
+			},
+		)
 	}
 }
 
@@ -283,6 +327,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		span, tracer := middleware.AllCtx(ctx)
 		trxTypeEnum := []string{"all", "in", "out"}
 		key := "account_trx"
+		svcCode := config.SVC_CODE_TRX_HISTORY_LIST
 
 		idStr := r.PathValue("id")
 		trxType := r.URL.Query().Get("type")
@@ -301,7 +346,12 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.SnapInvalidFormat.ResponseMessage,
+			)
 			return
 		}
 
@@ -311,7 +361,12 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 		if !isValidType {
 			h.logger.Error(models.ErrInvalidTrxType.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidTrxType), models.ErrInvalidTrxType.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.SnapInvalidFormat.ResponseMessage,
+			)
 			return
 		}
 
@@ -356,9 +411,15 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 						zap.String("source", "redis"),
 						zap.Int("handler.result.count", len(transactions)),
 					)
-					dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data transaksi dengan id akun = %s & tipe transaksi = %s", idParse, trxType), map[string]any{
-						"transactions": transactions,
-					})
+					dto.WriteResponse(
+						w,
+						models.SnapSuccess.HttpCode,
+						models.SnapSuccess.GetResponseCode(svcCode),
+						models.SnapSuccess.ResponseMessage,
+						map[string]any{
+							"transactions": transactions,
+						},
+					)
 					return
 				}
 			}
@@ -374,13 +435,19 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 
 		// Exec
 		dbCtx, dbSpan := tracer.Start(ctx, "Fetch-from-Database")
-		transactions, err := h.svc.FetchTransactionsByAccountId(dbCtx, idStr, trxType)
+		transactions, snapErr := h.svc.FetchTransactionsByAccountId(dbCtx, idStr, trxType)
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error(err.Error(), zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixError := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
+			span.RecordError(prefixError)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode(svcCode),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -398,9 +465,15 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 			zap.Int("handler.result.count", len(transactions)),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil mengambil data transaksi dengan id akun = %s & tipe transaksi = %s", idParse, trxType), map[string]any{
-			"transactions": transactions,
-		})
+		dto.WriteResponse(
+			w,
+			models.SnapSuccess.HttpCode,
+			models.SnapSuccess.GetResponseCode(svcCode),
+			models.SnapSuccess.ResponseMessage,
+			map[string]any{
+				"transactions": transactions,
+			},
+		)
 	}
 }
 
@@ -411,25 +484,37 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		ctx := r.Context()
 		span, tracer := middleware.AllCtx(ctx)
 		key := "account_list"
+		svcCode := config.SVC_CODE_ACCOUNT_CREATION
 
 		var payload models.Account
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.SnapInvalidFormat.ResponseMessage,
+			)
 			return
 		}
 
 		h.logger.Info("Payload received", zap.Any("payload", payload))
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Create-Account")
-		newAccount, err := h.svc.CreateNewAccount(dbCtx, payload)
+		newAccount, snapErr := h.svc.CreateNewAccount(dbCtx, payload)
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error(err.Error(), zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixError := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
+			span.RecordError(prefixError)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode(svcCode),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -456,9 +541,15 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			zap.String("handler.result.id", newAccount.ID.String()),
 		)
 
-		dto.WriteResponse(w, http.StatusCreated, "Berhasil membuat data akun baru", map[string]any{
-			"account": newAccount,
-		})
+		dto.WriteResponse(
+			w,
+			models.SnapSuccess.HttpCode,
+			models.SnapSuccess.GetResponseCode(svcCode),
+			models.SnapSuccess.ResponseMessage,
+			map[string]any{
+				"account": newAccount,
+			},
+		)
 	}
 }
 
@@ -470,6 +561,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		span, tracer := middleware.AllCtx(ctx)
 		keyList := "account_list"
 		keyId := "account_id"
+		svcCode := config.SVC_CODE_ACCOUNT_BIND
 
 		idStr := r.PathValue("id")
 		h.logger.Info("Path received", zap.String("handler.query", idStr))
@@ -479,7 +571,12 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.SnapInvalidFormat.ResponseMessage,
+			)
 			return
 		}
 
@@ -487,7 +584,12 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
 			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidJsonFormat), models.ErrInvalidJsonFormat.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.SnapInvalidFormat.ResponseMessage,
+			)
 			return
 		}
 
@@ -496,13 +598,19 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 		payload.ID = idParse
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Update-Account")
-		updatedId, err := h.svc.PatchAccountById(dbCtx, payload)
+		updatedId, snapErr := h.svc.PatchAccountById(dbCtx, payload)
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error(err.Error(), zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixError := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
+			span.RecordError(prefixError)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode(svcCode),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -534,9 +642,15 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 			zap.String("handler.result.id", updatedId),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, "Berhasil mengupdate data account", map[string]any{
-			"id": updatedId,
-		})
+		dto.WriteResponse(
+			w,
+			models.SnapSuccess.HttpCode,
+			models.SnapSuccess.GetResponseCode(svcCode),
+			fmt.Sprintf("Berhasil menghapus akun dengan id : %s", idStr),
+			map[string]any{
+				"id": updatedId,
+			},
+		)
 	}
 }
 
@@ -548,6 +662,7 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 		span, tracer := middleware.AllCtx(ctx)
 		keyList := "account_list"
 		keyId := "account_id"
+		svcCode := config.SVC_CODE_ACCOUNT_UNBIND
 
 		idStr := r.PathValue("id")
 		h.logger.Info("Path received", zap.String("handler.query", idStr))
@@ -557,18 +672,29 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 		if errId != nil {
 			h.logger.Error(models.ErrInvalidUuid.Error(), zap.Error(errId))
 			span.RecordError(errId)
-			dto.WriteError(w, models.StatusCodeHandler(models.ErrInvalidUuid), models.ErrInvalidUuid.Error())
+			dto.WriteError(
+				w,
+				models.SnapInvalidFormat.HttpCode,
+				models.SnapInvalidFormat.GetResponseCode(svcCode),
+				models.ErrInvalidUuid.Error(),
+			)
 			return
 		}
 
 		dbCtx, dbSpan := tracer.Start(ctx, "Delete-Account")
-		err := h.svc.DeleteAccountById(dbCtx, idParse.String())
+		snapErr := h.svc.DeleteAccountById(dbCtx, idParse.String())
 		dbSpan.End()
 
-		if err != nil {
-			h.logger.Error(err.Error(), zap.Error(err))
-			span.RecordError(err)
-			dto.WriteError(w, models.StatusCodeHandler(err), err.Error())
+		if snapErr != nil {
+			prefixErr := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(prefixErr.Error(), zap.Error(prefixErr))
+			span.RecordError(prefixErr)
+			dto.WriteError(
+				w,
+				snapErr.HttpCode,
+				snapErr.GetResponseCode(svcCode),
+				snapErr.ResponseMessage,
+			)
 			return
 		}
 
@@ -599,6 +725,12 @@ func (h *AccountsHandler) Delete() http.HandlerFunc {
 			zap.String("handler.delete.id", idParse.String()),
 		)
 
-		dto.WriteResponse(w, http.StatusOK, fmt.Sprintf("Berhasil menghapus akun dengan id : %s", idStr), map[string]any{})
+		dto.WriteResponse(
+			w,
+			models.SnapSuccess.HttpCode,
+			models.SnapSuccess.GetResponseCode(svcCode),
+			fmt.Sprintf("Berhasil menghapus akun dengan id : %s", idStr),
+			map[string]any{},
+		)
 	}
 }

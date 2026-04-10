@@ -22,12 +22,12 @@ import (
 )
 
 type AccountRepository interface {
-	GetAllAccounts(ctx context.Context) ([]models.Account, error)
-	GetAccountById(ctx context.Context, id string) (*models.Account, error)
-	GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error)
-	CreateAccount(ctx context.Context, account models.Account) (string, error)
-	UpdateAccount(ctx context.Context, account models.Account) (string, error)
-	DeleteAccount(ctx context.Context, id string) error
+	GetAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail)
+	GetAccountById(ctx context.Context, id string) (*models.Account, *models.SnapDetail)
+	GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail)
+	CreateAccount(ctx context.Context, account models.Account) (string, *models.SnapDetail)
+	UpdateAccount(ctx context.Context, account models.Account) (string, *models.SnapDetail)
+	DeleteAccount(ctx context.Context, id string) *models.SnapDetail
 }
 
 type accountRepository struct {
@@ -47,7 +47,7 @@ func NewAccountRepository(db *sqlx.DB) AccountRepository {
 const repoAccount = "account"
 
 // Get All
-func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Account, error) {
+func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.GetAll")
@@ -81,7 +81,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
-		return nil, models.ErrDatabaseIssue
+		return nil, &models.SnapInternalError
 	}
 
 	span.SetAttributes(attribute.Int("db.result.count", len(accounts)))
@@ -94,7 +94,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 }
 
 // Get Account By ID
-func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*models.Account, error) {
+func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*models.Account, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.GetById")
@@ -128,11 +128,11 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 
 		if errors.Is(err, sql.ErrNoRows) {
 			r.logger.Error(models.ErrIdNotFound.Error(), zap.Error(err))
-			return nil, models.ErrIdNotFound
+			return nil, &models.SnapInvalidAccount
 		}
 
 		r.logger.Error("query failed", zap.Error(err))
-		return nil, models.ErrDatabaseIssue
+		return nil, &models.SnapInternalError
 	}
 
 	span.SetAttributes(
@@ -149,7 +149,7 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 }
 
 // Get Transaction by Account Id
-func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, error) {
+func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.GetTransactionsByAccountId")
@@ -208,7 +208,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		r.logger.Error("query failed", zap.Error(err))
-		return nil, models.ErrDatabaseIssue
+		return nil, &models.SnapInternalError
 	}
 
 	if transactions == nil {
@@ -231,7 +231,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 }
 
 // Post Create New Account
-func (r *accountRepository) CreateAccount(ctx context.Context, account models.Account) (string, error) {
+func (r *accountRepository) CreateAccount(ctx context.Context, account models.Account) (string, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.Create")
@@ -265,12 +265,12 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
 				r.logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
-				return "", models.ErrDuplicateAccount
+				return "", &models.SnapDuplicateExtID
 			}
 		}
 
 		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
-		return "", models.ErrDatabaseFailed
+		return "", &models.SnapInternalError
 	}
 
 	span.SetAttributes(
@@ -287,7 +287,7 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 }
 
 // Method Update
-func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Account) (string, error) {
+func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Account) (string, *models.SnapDetail) {
 	fields := []string{}
 	args := []any{}
 	idx := 1
@@ -348,12 +348,12 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
 				r.logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
-				return "", models.ErrDuplicateAccount
+				return "", &models.SnapDuplicateRefNo
 			}
 		}
 
 		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
-		return "", models.ErrDatabaseFailed
+		return "", &models.SnapInternalError
 	}
 
 	// Cek apakah data dengan ID tersebut ditemukan
@@ -361,13 +361,13 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 	if err != nil {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 		r.logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
-		return "", models.ErrDatabaseIssue
+		return "", &models.SnapInternalError
 	}
 
 	if rowsAffected == 0 {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 		r.logger.Error(models.ErrIdNotFound.Error())
-		return "", models.ErrIdNotFound
+		return "", &models.SnapInvalidAccount
 	}
 
 	span.SetAttributes(
@@ -384,7 +384,7 @@ func (r *accountRepository) UpdateAccount(ctx context.Context, account models.Ac
 }
 
 // Method Delete
-func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error {
+func (r *accountRepository) DeleteAccount(ctx context.Context, id string) *models.SnapDetail {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountRepo.Delete")
@@ -414,7 +414,7 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error 
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		r.logger.Error(models.ErrDatabaseFailed.Error(), zap.Error(err))
-		return models.ErrDeleteFailed
+		return &models.SnapInternalError
 	}
 
 	// Cek apakah data dengan ID tersebut ditemukan
@@ -422,13 +422,13 @@ func (r *accountRepository) DeleteAccount(ctx context.Context, id string) error 
 	if err != nil {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 		r.logger.Error(models.ErrDatabaseIssue.Error(), zap.Error(err))
-		return models.ErrDatabaseIssue
+		return &models.SnapInternalError
 	}
 
 	if rowsAffected == 0 {
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 		r.logger.Error(models.ErrIdNotFound.Error())
-		return models.ErrIdNotFound
+		return &models.SnapInvalidAccount
 	}
 
 	span.SetAttributes(

@@ -5,6 +5,7 @@ import (
 	"belajar-go/challenge/transactionSystem/dto"
 	"belajar-go/challenge/transactionSystem/helper"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -38,7 +39,12 @@ func (m *IdempotencyMiddleware) Check(next http.HandlerFunc) http.HandlerFunc {
 			if err != nil {
 				if err == redis.Nil {
 					helper.PrintLog("idempotency", helper.LogPositionHandler, "Request duplikat terdeteksi via Idempotency Key")
-					dto.WriteError(w, http.StatusConflict, "Request sedang diproses atau sudah terkirim")
+					dto.WriteError(
+						w,
+						http.StatusConflict,
+						strconv.Itoa(http.StatusConflict),
+						"Request sedang diproses atau sudah terkirim",
+					)
 					return
 				}
 

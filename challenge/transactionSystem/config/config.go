@@ -18,25 +18,23 @@ const (
 )
 
 const (
-	SVC_CODE_CARD_REGISTRATION        = iota + 1 // 1
-	SVC_CODE_CARD_BIND_LIMIT                     // 2
-	SVC_CODE_CARD_INQUIRY                        // 3
-	SVC_CODE_OTP_VERIFICATION                    // 4
-	SVC_CODE_CARD_UNBIND                         // 5
-	SVC_CODE_ACCOUNT_CREATION                    // 6
-	SVC_CODE_ACCOUNT_BIND                        // 7
-	SVC_CODE_ACCOUNT_INQUIRY                     // 8
-	SVC_CODE_ACCOUNT_UNBIND                      // 9
-	SVC_CODE_AUTH_CODE                           // 10
-	SVC_CODE_BALANCE_INQUIRY                     // 11
-	SVC_CODE_TRX_HISTORY_LIST                    // 12
-	SVC_CODE_TRX_HISTORY_DETAIL                  // 13
-	SVC_CODE_BANK_STATEMENT                      // 14
-	SVC_CODE_ACCOUNT_INQUIRY_INTERNAL            // 15
-	SVC_CODE_ACCOUNT_INQUIRY_EXTERNAL            // 16
-	SVC_CODE_TRANSFER_INTRABANK                  // 17
-	SVC_CODE_TRANSFER_INTERBANK                  // 18
-	SVC_CODE_TRANSFER_REQUEST_PAYMENT            // 19
-	// SVC_CODE_OTP               = 81     // 81
-
+	SVC_CODE_CARD_REGISTRATION        = "01"
+	SVC_CODE_CARD_BIND_LIMIT          = "02"
+	SVC_CODE_CARD_INQUIRY             = "03"
+	SVC_CODE_OTP_VERIFICATION         = "04"
+	SVC_CODE_CARD_UNBIND              = "05"
+	SVC_CODE_ACCOUNT_CREATION         = "06"
+	SVC_CODE_ACCOUNT_BIND             = "07"
+	SVC_CODE_ACCOUNT_INQUIRY          = "08"
+	SVC_CODE_ACCOUNT_UNBIND           = "09"
+	SVC_CODE_AUTH_CODE                = "10"
+	SVC_CODE_BALANCE_INQUIRY          = "11"
+	SVC_CODE_TRX_HISTORY_LIST         = "12"
+	SVC_CODE_TRX_HISTORY_DETAIL       = "13"
+	SVC_CODE_BANK_STATEMENT           = "14"
+	SVC_CODE_ACCOUNT_INQUIRY_INTERNAL = "15"
+	SVC_CODE_ACCOUNT_INQUIRY_EXTERNAL = "16"
+	SVC_CODE_TRANSFER_INTRABANK       = "17"
+	SVC_CODE_TRANSFER_INTERBANK       = "18"
+	SVC_CODE_TRANSFER_REQUEST_PAYMENT = "19"
 )

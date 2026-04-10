@@ -4,6 +4,7 @@ import (
 	"belajar-go/challenge/transactionSystem/dto"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 type responseInterceptor struct {
@@ -49,13 +50,23 @@ func ErrorHandling(mux *http.ServeMux) http.HandlerFunc {
 
 		// Route tidak ditemukan sama sekali
 		if !interceptor.routeMatched {
-			dto.WriteError(w, http.StatusNotFound, "Route tidak ditemukan!")
+			dto.WriteError(
+				w,
+				http.StatusNotFound,
+				strconv.Itoa(http.StatusNotFound),
+				"Route tidak ditemukan!",
+			)
 			return
 		}
 
 		// Route ditemukan tapi method tidak cocok
 		if interceptor.statusCode == http.StatusMethodNotAllowed {
-			dto.WriteError(w, http.StatusMethodNotAllowed, "Method tidak diizinkan!")
+			dto.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				strconv.Itoa(http.StatusMethodNotAllowed),
+				"Method tidak diizinkan!",
+			)
 			return
 		}
 	}
