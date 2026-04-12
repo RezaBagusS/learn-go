@@ -55,8 +55,13 @@ func Challenge2() {
 		log.Fatal("Redis tidak merespon")
 	}
 
+	// Kafka Producer
+	brokers := config.KafkaBrokers()
+	kafkaProducer := config.ConnectKafka(helper.Log)
+	defer kafkaProducer.Close()
+
 	fmt.Println("Koneksi Database dan Redis berhasil!")
 
-	svr := server.NewServer(db, rdb)
+	svr := server.NewServer(db, rdb, kafkaProducer, brokers)
 	svr.Run()
 }

@@ -28,9 +28,75 @@ services:
       - "${REDIS_PORT}:6379"
     networks:
       - transaction_net
-    # redis data:
     volumes:
       - redis_data:/data
+
+  # ============================================================
+  # KAFKA KRaft (tanpa Zookeeper)
+  # ============================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    ports:
+      - "9092:9092"   # akses dari host (Go app lokal)
+      - "9093:9093"   # internal controller KRaft
+    environment:
+      # --- KRaft mode ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller          # node ini sekaligus broker dan controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093   # daftar voter: nodeId@host:controllerPort
+
+      # --- Listeners ---
+      # INTERNAL : komunikasi antar service di dalam docker network
+      # EXTERNAL : akses dari luar docker (host / Go app lokal)
+      # CONTROLLER: khusus KRaft controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # --- Topic defaults ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1       # single node, jadi cukup 1 replica
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3                         # default partisi tiap topic baru
+
+      # --- Performance & log ---
+      KAFKA_LOG_RETENTION_HOURS: 168                  # simpan pesan 7 hari
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824             # 1 GB per segment
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+
+      # --- KRaft cluster ID (generate sekali, hardcode di sini) ---
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"           # bisa generate ulang dengan: kafka-storage random-uuid
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s                               # beri waktu KRaft init
+    networks:
+      - transaction_net
+
+  # ============================================================
+  # KAFKA UI — monitor topic, consumer group, messages
+  # ============================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-kraft
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092  # pakai listener INTERNAL
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - transaction_net
 
   app:
     build: .
@@ -44,6 +110,8 @@ services:
         condition: service_started
       tempo:
         condition: service_started
+      kafka:
+        condition: service_healthy                    # tunggu kafka siap sebelum app start
     volumes:
       - .:/app
       - ./migrations:/app/migrations
@@ -61,6 +129,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
       MIGRATIONS_PATH: "file:///root/migrations"
+      # --- Kafka ---
+      KAFKA_BROKERS: kafka:29092                      # Go app pakai listener INTERNAL
     networks:
       - transaction_net
 
@@ -83,13 +153,12 @@ services:
     volumes:
       - ./etc/tempo/tempo.yaml:/etc/tempo.yaml
     ports:
-      - "3200:3200" # Untuk Grafana Data Source
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP (Ini yang kita pakai buat curl)
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
     networks:
       - transaction_net
 
-  # Loki untuk Logging
   loki:
     image: grafana/loki:latest
     container_name: loki
@@ -101,7 +170,6 @@ services:
     networks:
       - transaction_net
 
-  # Grafana untuk Visualisasi
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -122,6 +190,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  kafka_data:                                         # persistent storage untuk Kafka log
 
 networks:
   transaction_net:

@@ -6,12 +6,14 @@ import (
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/transactions/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/transactions/service"
+	"belajar-go/challenge/transactionSystem/internal/kafka"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,9 +32,10 @@ type TransactionsHandler struct {
 	accountKeyManager *helper.RedisKeyManager
 	idempotency       *middleware.IdempotencyMiddleware
 	logger            *zap.Logger
+	producer          *kafka.Producer
 }
 
-func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *TransactionsHandler {
+func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client, producer *kafka.Producer) *TransactionsHandler {
 	trxRepo := repository.NewtransactionRepository(db)
 	TrxSvc := service.NewTransactionsService(trxRepo)
 	keyManager := helper.NewRedisKeyManager("transaction_system", config.DOMAIN_TRANSACTION)
@@ -48,6 +51,7 @@ func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) 
 		accountKeyManager: accountKeyManager,
 		idempotency:       idempotency,
 		logger:            logger,
+		producer:          producer,
 	}
 }
 
@@ -604,6 +608,7 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 		referenceNo, err := h.svc.TransferIntrabank(svcCtx, accountId, snapHeader, payload)
 		svcSpan.End()
 
+		// --- publish TransactionFailedEvent ---
 		if err != nil {
 
 			er := errors.New(err.ResponseMessage)
@@ -611,6 +616,22 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			h.logger.Error(err.ResponseMessage, zap.Error(er))
 			span.RecordError(er)
 			span.SetStatus(codes.Error, err.ResponseMessage)
+
+			amountFloat, _ := strconv.ParseFloat(payload.Amount.Value, 64)
+
+			failedEvent := kafka.TransactionFailedEvent{
+				TransactionID:   payload.PartnerReferenceNo, // referenceNo belum ada saat gagal
+				SenderAccount:   payload.SourceAccountNo,
+				ReceiverAccount: payload.BeneficiaryAccountNo,
+				Amount:          amountFloat,
+				Reason:          err.ResponseMessage,
+				FailedAt:        time.Now(),
+			}
+
+			if pubErr := h.producer.Publish(ctx, kafka.TopicTransactionFailed, payload.PartnerReferenceNo, failedEvent); pubErr != nil {
+				h.logger.Error("failed to publish transaction.failed event", zap.Error(pubErr))
+			}
+
 			dto.WriteError(
 				w,
 				err.HttpCode,
@@ -663,6 +684,43 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 				span.AddEvent("Summary Cache Invalidated")
 				h.logger.Info("Summary cache invalidated", zap.Strings("keys", summaryKeys))
 			}
+		}
+
+		// --- publish TransactionSucceedEvent ---
+		amountFloat, _ := strconv.ParseFloat(payload.Amount.Value, 64)
+		createdEvent := kafka.TransactionCreatedEvent{
+			TransactionID:   referenceNo,
+			SenderAccount:   payload.SourceAccountNo,
+			ReceiverAccount: payload.BeneficiaryAccountNo,
+			Amount:          amountFloat,
+			Currency:        payload.Amount.Currency,
+			CreatedAt:       time.Now(),
+		}
+		if pubErr := h.producer.Publish(ctx, kafka.TopicTransactionCreated, referenceNo, createdEvent); pubErr != nil {
+			h.logger.Error("failed to publish transaction.created event", zap.Error(pubErr))
+		}
+
+		// --- publish BalanceUpdatedEvent ---
+		// For Sender
+		senderEvent := kafka.AccountBalanceUpdatedEvent{
+			AccountNo: payload.SourceAccountNo,
+			Amount:    amountFloat,
+			Type:      "out",
+			UpdatedAt: time.Now(),
+		}
+		if pubErr := h.producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.SourceAccountNo, senderEvent); pubErr != nil {
+			h.logger.Error("failed to publish account.balance.updated event (sender)", zap.Error(pubErr))
+		}
+
+		// For Receiver
+		receiverEvent := kafka.AccountBalanceUpdatedEvent{
+			AccountNo: payload.BeneficiaryAccountNo,
+			Amount:    amountFloat,
+			Type:      "in",
+			UpdatedAt: time.Now(),
+		}
+		if pubErr := h.producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.BeneficiaryAccountNo, receiverEvent); pubErr != nil {
+			h.logger.Error("failed to publish account.balance.updated event (receiver)", zap.Error(pubErr))
 		}
 
 		span.SetStatus(codes.Ok, "transfer intrabank berhasil")

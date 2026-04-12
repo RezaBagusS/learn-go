@@ -1,11 +1,15 @@
 package server
 
 import (
+	"belajar-go/challenge/transactionSystem/helper"
 	accountHandler "belajar-go/challenge/transactionSystem/internal/api/accounts/handler"
 	bankHandler "belajar-go/challenge/transactionSystem/internal/api/banks/handler"
 	oauthHandler "belajar-go/challenge/transactionSystem/internal/api/oauth/handler"
 	transactionHandler "belajar-go/challenge/transactionSystem/internal/api/transactions/handler"
+	"belajar-go/challenge/transactionSystem/internal/kafka"
+	kafkahandler "belajar-go/challenge/transactionSystem/internal/kafka/handler"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,21 +22,25 @@ import (
 )
 
 type Server struct {
-	mux *http.ServeMux
-	db  *sqlx.DB
-	rdb *redis.Client
-	obs *middleware.ObservabilityMiddleware
+	mux      *http.ServeMux
+	db       *sqlx.DB
+	rdb      *redis.Client
+	obs      *middleware.ObservabilityMiddleware
+	producer *kafka.Producer // tambah
+	stopFn   func()          // untuk stop semua consumer saat shutdown
 }
 
-func NewServer(db *sqlx.DB, rdb *redis.Client) *Server {
+func NewServer(db *sqlx.DB, rdb *redis.Client, producer *kafka.Producer, brokers []string) *Server {
 	s := &Server{
-		mux: http.NewServeMux(),
-		db:  db,
-		rdb: rdb,
-		obs: middleware.NewObservabilityMiddleware(),
+		mux:      http.NewServeMux(),
+		db:       db,
+		rdb:      rdb,
+		obs:      middleware.NewObservabilityMiddleware(),
+		producer: producer,
 	}
 
 	s.registerRoutes()
+	s.startConsumers(brokers)
 	return s
 }
 
@@ -51,10 +59,38 @@ func (s *Server) registerRoutes() {
 	bnkHandler.MapRoutes(s.obs)
 
 	// Transaction Domain =====
-	trxHandler := transactionHandler.NewTransactionsHandler(s.mux, s.db, s.rdb)
+	trxHandler := transactionHandler.NewTransactionsHandler(s.mux, s.db, s.rdb, s.producer)
 	trxHandler.MapRoutes(s.obs)
 
 	s.mux.Handle("/metrics", promhttp.Handler())
+}
+
+func (s *Server) startConsumers(brokers []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.stopFn = cancel // simpan cancel untuk dipanggil saat shutdown
+
+	logger := helper.Log
+	trxKafkaHandler := kafkahandler.NewTransactionKafkaHandler(logger)
+
+	// Consumer: transaction.created
+	createdConsumer := kafka.NewConsumer[kafka.TransactionCreatedEvent](
+		brokers, kafka.TopicTransactionCreated, "transaction-service", logger,
+	)
+	createdConsumer.Start(ctx, trxKafkaHandler.HandleCreated)
+
+	// Consumer: transaction.failed
+	failedConsumer := kafka.NewConsumer[kafka.TransactionFailedEvent](
+		brokers, kafka.TopicTransactionFailed, "transaction-service", logger,
+	)
+	failedConsumer.Start(ctx, trxKafkaHandler.HandleFailed)
+
+	// Consumer: account.balance.updated
+	balanceConsumer := kafka.NewConsumer[kafka.AccountBalanceUpdatedEvent](
+		brokers, kafka.TopicAccountBalanceUpdated, "transaction-service", logger,
+	)
+	balanceConsumer.Start(ctx, trxKafkaHandler.HandleBalanceUpdated)
+
+	logger.Info("kafka consumers started")
 }
 
 func (s *Server) Run() {
@@ -64,4 +100,11 @@ func (s *Server) Run() {
 
 	fmt.Printf("Server berjalan di %s:%s\n", addr, port)
 	log.Fatal(http.ListenAndServe(listen, middleware.ErrorHandling(s.mux)))
+}
+
+func (s *Server) Shutdown() {
+	if s.stopFn != nil {
+		s.stopFn()
+	}
+	s.producer.Close()
 }
