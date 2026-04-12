@@ -72,8 +72,10 @@ func (a *AccountsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware) {
 		obs.Wrap("AccountHandler.GetTrx", config.DOMAIN_ACCOUNT, a.GetTransactions()).ServeHTTP,
 	)
 	a.mux.HandleFunc(
-		helper.NewAPIPath(http.MethodPost, version, "/account"),
-		obs.Wrap("AccountHandler.Create", config.DOMAIN_ACCOUNT, a.idempotency.Check(a.Create())).ServeHTTP,
+		helper.NewAPIPath(http.MethodPost, version, "/registration-account-creation"),
+		middleware.ValidateSNAPToken(
+			obs.Wrap("AccountHandler.Create", config.DOMAIN_ACCOUNT, a.idempotency.Check(a.Create())),
+		).ServeHTTP,
 	)
 	a.mux.HandleFunc(
 		helper.NewAPIPath(http.MethodPatch, version, "/account/{id}"),
@@ -477,7 +479,7 @@ func (h *AccountsHandler) GetTransactions() http.HandlerFunc {
 	}
 }
 
-// POST /account
+// POST /v1.0/registration-account-creation
 func (h *AccountsHandler) Create() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -486,10 +488,43 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		key := "account_list"
 		svcCode := config.SVC_CODE_ACCOUNT_CREATION
 
-		var payload models.Account
+		snapHeader := models.ExtractSNAPHeader(r)
+		if snapHeader.Timestamp == "" || snapHeader.PartnerID == "" ||
+			snapHeader.ExternalID == "" || snapHeader.ChannelID == "" {
+			h.logger.Error(models.SnapUnauthorized.ResponseMessage,
+				zap.String("x_timestamp", snapHeader.Timestamp),
+				zap.String("x_partner_id", snapHeader.PartnerID),
+				zap.String("x_external_id", snapHeader.ExternalID),
+				zap.String("channel_id", snapHeader.ChannelID),
+			)
+			span.SetStatus(codes.Error, models.SnapUnauthorized.ResponseMessage)
+			span.SetAttributes(attribute.String("snap.error", "header_tidak_lengkap"))
+			dto.WriteError(
+				w,
+				models.SnapUnauthorized.HttpCode,
+				models.SnapUnauthorized.GetResponseCode(svcCode),
+				models.SnapUnauthorized.ResponseMessage,
+			)
+			return
+		}
+
+		span.SetAttributes(
+			attribute.String("snap.partner_id", snapHeader.PartnerID),
+			attribute.String("snap.external_id", snapHeader.ExternalID),
+			attribute.String("snap.channel_id", snapHeader.ChannelID),
+			attribute.String("snap.timestamp", snapHeader.Timestamp),
+		)
+
+		// --- Decode request body ---
+		var payload models.AccountCreateRequest
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			h.logger.Error(models.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			h.logger.Error(models.ErrInvalidJsonFormat.Error(),
+				zap.Error(err),
+				zap.String("x_partner_id", snapHeader.PartnerID),
+				zap.String("x_external_id", snapHeader.ExternalID),
+			)
 			span.RecordError(err)
+			span.SetStatus(codes.Error, models.ErrInvalidJsonFormat.Error())
 			dto.WriteError(
 				w,
 				models.SnapInvalidFormat.HttpCode,
@@ -499,11 +534,57 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			return
 		}
 
-		h.logger.Info("Payload received", zap.Any("payload", payload))
+		// --- Validasi field wajib (SNAP Mandatory Fields) ---
+		if payload.PartnerReferenceNo == "" ||
+			payload.CustomerID == "" ||
+			payload.Name == "" ||
+			payload.PhoneNo == "" ||
+			payload.Email == "" ||
+			payload.OnboardingPartner == "" ||
+			payload.MerchantID == "" ||
+			payload.RedirectURL == "" ||
+			payload.State == "" {
 
-		dbCtx, dbSpan := tracer.Start(ctx, "Create-Account")
-		newAccount, snapErr := h.svc.CreateNewAccount(dbCtx, payload)
-		dbSpan.End()
+			h.logger.Error("Field wajib tidak lengkap",
+				zap.String("partner_ref_no", payload.PartnerReferenceNo),
+				zap.String("customer_id", payload.CustomerID),
+				zap.String("merchant_id", payload.MerchantID),
+			)
+
+			span.SetStatus(codes.Error, "mandatory field is missing")
+
+			dto.WriteError(
+				w,
+				models.SnapMandatoryField.HttpCode,
+				models.SnapMandatoryField.GetResponseCode(svcCode),
+				models.SnapMandatoryField.ResponseMessage,
+			)
+			return
+		}
+
+		h.logger.Info("Payload registration account creation diterima",
+			zap.String("partner_reference_no", payload.PartnerReferenceNo),
+			zap.String("customer_id", payload.CustomerID),
+			zap.String("customer_name", payload.Name),
+			zap.String("phone_no", payload.PhoneNo),
+			zap.String("email", payload.Email),
+			zap.String("onboarding_partner", payload.OnboardingPartner),
+			zap.String("merchant_id", payload.MerchantID),
+			zap.String("redirect_url", payload.RedirectURL),
+		)
+
+		svcCtx, svcSpan := tracer.Start(ctx, "Create-Account")
+		svcSpan.SetAttributes(
+			attribute.String("db.partner_reference_no", payload.PartnerReferenceNo),
+			attribute.String("db.bank_code", payload.BankCode),
+			attribute.String("db.account_holder", payload.Name),
+			attribute.String("db.account_number", payload.CustomerID),
+			attribute.String("db.email", payload.Email),
+			attribute.String("db.phone_no", payload.PhoneNo),
+			attribute.String("db.merchant_id", payload.MerchantID),
+		)
+		newAccount, snapErr := h.svc.CreateNewAccount(svcCtx, payload)
+		svcSpan.End()
 
 		if snapErr != nil {
 			prefixError := errors.New(snapErr.ResponseMessage)
@@ -534,21 +615,28 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		metrics.CacheDuration.WithLabelValues("invalidate", key).
 			Observe(time.Since(cacheStart).Seconds())
 
-		span.SetAttributes(attribute.String("handler.result.id", newAccount.ID.String()))
+		span.SetAttributes(attribute.String("handler.result.id", newAccount.AccountID))
 
 		h.logger.Info("Berhasil membuat data akun baru",
 			zap.String("source", "database"),
-			zap.String("handler.result.id", newAccount.ID.String()),
+			zap.String("handler.result.id", newAccount.AccountID),
 		)
+
+		responseBody := models.AccountCreateResponse{
+			ReferenceNo:        newAccount.ReferenceNo,
+			PartnerReferenceNo: newAccount.PartnerReferenceNo,
+			AuthCode:           newAccount.AuthCode,
+			APIKey:             newAccount.APIKey,
+			AccountID:          newAccount.AccountID,
+			State:              newAccount.State,
+			AdditionalInfo:     newAccount.AdditionalInfo,
+		}
 
 		dto.WriteResponse(
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			models.SnapSuccess.ResponseMessage,
-			map[string]any{
-				"account": newAccount,
-			},
+			models.SnapSuccess.ResponseMessage, responseBody,
 		)
 	}
 }

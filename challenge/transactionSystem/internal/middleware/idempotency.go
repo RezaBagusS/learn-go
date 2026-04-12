@@ -25,7 +25,7 @@ func NewIdempotencyMiddleware(rdb *redis.Client, keyManager *helper.RedisKeyMana
 
 func (m *IdempotencyMiddleware) Check(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		idempotencyKey := r.Header.Get("X-Idempotency-Key")
+		idempotencyKey := r.Header.Get("X-EXTERNAL-ID")
 
 		if idempotencyKey != "" {
 			ctx := r.Context()

@@ -32,14 +32,9 @@ type Amount struct {
 }
 
 type OriginatorInfo struct {
-	OriginatorCustomerNo   string `json:"originatorCustomerNo"`
-	OriginatorCustomerName string `json:"originatorCustomerName"`
-	OriginatorBankCode     string `json:"originatorBankCode"`
-}
-
-type AdditionalInfo struct {
-	DeviceId string `json:"deviceId"`
-	Channel  string `json:"channel"`
+	OriginatorCustomerNo   string `json:"originator_customer_no"`
+	OriginatorCustomerName string `json:"originator_customer_name"`
+	OriginatorBankCode     string `json:"originator_bank_code"`
 }
 
 type TransactionAdditionalInfo struct {
@@ -51,31 +46,31 @@ type TransactionAdditionalInfo struct {
 }
 
 type TransferIntrabankRequest struct {
-	PartnerReferenceNo   string           `json:"partnerReferenceNo"`
+	PartnerReferenceNo   string           `json:"partner_reference_no"`
 	Amount               Amount           `json:"amount"`
-	BeneficiaryAccountNo string           `json:"beneficiaryAccountNo"`
-	BeneficiaryEmail     string           `json:"beneficiaryEmail"`
+	BeneficiaryAccountNo string           `json:"beneficiary_account_no"`
+	BeneficiaryEmail     string           `json:"beneficiary_email"`
 	Currency             string           `json:"currency"`
-	CustomerReference    string           `json:"customerReference"`
-	FeeType              string           `json:"feeType"`
+	CustomerReference    string           `json:"customer_reference"`
+	FeeType              string           `json:"fee_type"`
 	Remark               string           `json:"remark"`
-	SourceAccountNo      string           `json:"sourceAccountNo"`
-	TransactionDate      string           `json:"transactionDate"`
-	OriginatorInfos      []OriginatorInfo `json:"originatorInfos"`
-	AdditionalInfo       AdditionalInfo   `json:"additionalInfo"`
+	SourceAccountNo      string           `json:"source_account_no"`
+	TransactionDate      string           `json:"transaction_date"`
+	OriginatorInfos      []OriginatorInfo `json:"originator_infos"`
+	AdditionalInfo       AdditionalInfo   `json:"additional_info"`
 }
 
 type TransferIntrabankResponse struct {
-	ReferenceNo          string           `json:"referenceNo"`
-	PartnerReferenceNo   string           `json:"partnerReferenceNo"`
+	ReferenceNo          string           `json:"reference_no"`
+	PartnerReferenceNo   string           `json:"partner_reference_no"`
 	Amount               Amount           `json:"amount"`
-	BeneficiaryAccountNo string           `json:"beneficiaryAccountNo"`
+	BeneficiaryAccountNo string           `json:"beneficiary_account_no"`
 	Currency             string           `json:"currency"`
-	CustomerReference    string           `json:"customerReference"`
-	SourceAccount        string           `json:"sourceAccount"`
-	TransactionDate      string           `json:"transactionDate"`
-	OriginatorInfos      []OriginatorInfo `json:"originatorInfos"`
-	AdditionalInfo       AdditionalInfo   `json:"additionalInfo"`
+	CustomerReference    string           `json:"customer_reference"`
+	SourceAccount        string           `json:"source_account"`
+	TransactionDate      string           `json:"transaction_date"`
+	OriginatorInfos      []OriginatorInfo `json:"originator_infos"`
+	AdditionalInfo       AdditionalInfo   `json:"additional_info"`
 }
 
 type Transaction struct {

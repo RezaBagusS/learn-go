@@ -8,6 +8,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -20,7 +21,7 @@ type AccountsService interface {
 	FetchAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail)
 	FetchAccountById(ctx context.Context, id string) (*models.Account, *models.SnapDetail)
 	FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail)
-	CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, *models.SnapDetail)
+	CreateNewAccount(ctx context.Context, account models.AccountCreateRequest) (*models.AccountCreateResponse, *models.SnapDetail)
 	PatchAccountById(ctx context.Context, account models.Account) (string, *models.SnapDetail)
 	DeleteAccountById(ctx context.Context, id string) *models.SnapDetail
 }
@@ -170,32 +171,13 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 }
 
 // Create new account
-func (s *accountsService) CreateNewAccount(ctx context.Context, account models.Account) (*models.Account, *models.SnapDetail) {
+func (s *accountsService) CreateNewAccount(ctx context.Context, account models.AccountCreateRequest) (*models.AccountCreateResponse, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Create")
 	defer span.End()
 	operation := "account_exist"
 	operationCreate := "create"
-
-	s.logger.Info("checking payload")
-
-	if account.BankCode == "" || account.AccountNumber == "" || account.AccountHolder == "" {
-		span.RecordError(models.ErrInvalidField)
-		s.logger.Error(models.ErrInvalidField.Error(), zap.Error(models.ErrInvalidField))
-		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
-		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, &models.SnapMandatoryField
-	}
-
-	// Balance checking ...
-	if account.Balance < 0 {
-		span.RecordError(models.ErrInvalidInitBalance)
-		s.logger.Error(models.ErrInvalidInitBalance.Error(), zap.Error(models.ErrInvalidInitBalance))
-		metrics.BusinessValidationErrors.WithLabelValues(svcAccount, operation).Inc()
-		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
-		return nil, &models.SnapInvalidAmount
-	}
 
 	s.logger.Info("checking bank code")
 
@@ -211,14 +193,45 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
 		return nil, snapErr
 	}
-
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
+
+	// Serialisasi AdditionalInfo LENGKAP — sertakan semua field SNAP
+	additionalInfoBytes, err := json.Marshal(models.TransactionAdditionalInfo{
+		DeviceID: account.AdditionalInfo.DeviceId,
+		Channel:  account.AdditionalInfo.Channel,
+	})
+	if err != nil {
+		s.logger.Warn("failed to marshal additional info, using empty object", zap.Error(err))
+		additionalInfoBytes = []byte("{}")
+	}
+
+	referenceNo := helper.GenerateReferenceNo()
+
+	NewAccount := models.Account{
+		BankCode:           account.BankCode,
+		AccountNumber:      account.CustomerID,
+		AccountHolder:      account.Name,
+		ReferenceNo:        referenceNo,
+		PartnerReferenceNo: account.PartnerReferenceNo,
+		Email:              account.Email,
+		PhoneNo:            account.PhoneNo,
+		CountryCode:        account.CountryCode,
+		Lang:               account.Lang,
+		Locale:             account.Locale,
+		MerchantID:         account.MerchantID,
+		SubMerchantID:      account.SubMerchantID,
+		OnboardingPartner:  account.OnboardingPartner,
+		TerminalType:       account.TerminalType,
+		Scopes:             account.Scopes,
+		RedirectURL:        account.RedirectURL,
+		AdditionalInfo:     additionalInfoBytes,
+	}
 
 	s.logger.Info("creating new account")
 
 	// Simpan ke repository
 	svcStart := time.Now()
-	returnedId, snapErr := s.repo.CreateAccount(ctx, account)
+	returnedId, snapErr := s.repo.CreateAccount(ctx, NewAccount)
 	metrics.ServiceDuration.WithLabelValues(svcAccount, operationCreate).
 		Observe(time.Since(svcStart).Seconds())
 
@@ -230,7 +243,7 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		return nil, snapErr
 	}
 
-	account.ID = uuid.MustParse(returnedId)
+	NewAccount.ID = uuid.MustParse(returnedId)
 
 	span.SetAttributes(
 		attribute.String("service.result.id", returnedId),
@@ -240,9 +253,19 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		zap.String("service.result.id", returnedId),
 	)
 
+	accountResponse := models.AccountCreateResponse{
+		ReferenceNo:        NewAccount.ReferenceNo,
+		PartnerReferenceNo: NewAccount.PartnerReferenceNo,
+		AuthCode:           helper.GenerateAuthCode(),
+		APIKey:             helper.GenerateAPIKey(),
+		AccountID:          NewAccount.ID.String(),
+		State:              account.State,
+		AdditionalInfo:     account.AdditionalInfo,
+	}
+
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationCreate, "success").Inc()
 
-	return &account, nil
+	return &accountResponse, nil
 }
 
 // Update account

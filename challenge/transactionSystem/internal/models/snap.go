@@ -27,6 +27,18 @@ type SnapDetail struct {
 	IsAdditional    bool
 }
 
+type AdditionalInfo struct {
+	DeviceId string `json:"deviceId"`
+	Channel  string `json:"channel"`
+}
+
+type DeviceInfo struct {
+	OperatingSystem string `json:"os"`
+	OSversion       string `json:"1"`
+	Model           string `json:"model"`
+	Manufacture     string `json:"manufacture"`
+}
+
 func (d SnapDetail) GetResponseCode(ServiceCode string) string {
 	return fmt.Sprintf("%d%s%s", d.HttpCode, ServiceCode, d.CaseCode)
 }

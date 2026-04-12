@@ -31,14 +31,11 @@ services:
     volumes:
       - redis_data:/data
 
-  # ============================================================
-  # KAFKA KRaft (tanpa Zookeeper)
-  # ============================================================
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: kafka
     ports:
-      - "9092:9092"   # akses dari host (Go app lokal)
+      - "9092:9092"   # local
       - "9093:9093"   # internal controller KRaft
     environment:
       # --- KRaft mode ---
@@ -47,9 +44,6 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093   # daftar voter: nodeId@host:controllerPort
 
       # --- Listeners ---
-      # INTERNAL : komunikasi antar service di dalam docker network
-      # EXTERNAL : akses dari luar docker (host / Go app lokal)
-      # CONTROLLER: khusus KRaft controller
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
@@ -57,7 +51,7 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
 
       # --- Topic defaults ---
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1       # single node, jadi cukup 1 replica
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1       
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"

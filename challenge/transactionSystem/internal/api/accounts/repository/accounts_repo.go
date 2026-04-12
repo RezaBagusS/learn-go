@@ -54,8 +54,32 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 	defer span.End()
 	operation := "select"
 
-	query := `SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at 
-	FROM accounts ORDER BY updated_at desc`
+	query := `
+		SELECT
+			id,
+			bank_code,
+			account_number,
+			account_holder,
+			reference_no,
+			partner_reference_no,
+			balance,
+			currency,
+			email,
+			phone_no,
+			country_code,
+			lang,
+			locale,
+			merchant_id,
+			sub_merchant_id,
+			onboarding_partner,
+			terminal_type,
+			scopes,
+			redirect_url,
+			additional_info,
+			created_at,
+			updated_at
+		FROM accounts
+		ORDER BY updated_at DESC`
 
 	span.SetAttributes(
 		attribute.String("db.system", "postgresql"),
@@ -63,9 +87,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 		attribute.String("db.table", "accounts"),
 	)
 
-	r.logger.Info("executing query",
-		zap.String("query", "SELECT accounts"),
-	)
+	r.logger.Info("executing query", zap.String("query", "SELECT accounts"))
 
 	var accounts []models.Account
 
@@ -77,18 +99,14 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-
 		r.logger.Error("query failed", zap.Error(err))
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
-
 		return nil, &models.SnapInternalError
 	}
 
 	span.SetAttributes(attribute.Int("db.result.count", len(accounts)))
-
-	r.logger.Info("query success",
-		zap.Int("rows", len(accounts)),
-	)
+	r.logger.Info("query success", zap.Int("rows", len(accounts)))
+	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return accounts, nil
 }
@@ -101,16 +119,42 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 	defer span.End()
 	operation := "select_by_id"
 
-	query := "SELECT id, bank_code, account_number, account_holder, balance, created_at, updated_at FROM accounts WHERE id = $1"
+	query := `
+		SELECT
+			id,
+			bank_code,
+			account_number,
+			account_holder,
+			reference_no,
+			partner_reference_no,
+			balance,
+			currency,
+			email,
+			phone_no,
+			country_code,
+			lang,
+			locale,
+			merchant_id,
+			sub_merchant_id,
+			onboarding_partner,
+			terminal_type,
+			scopes,
+			redirect_url,
+			additional_info,
+			created_at,
+			updated_at
+		FROM accounts
+		WHERE id = $1`
 
 	span.SetAttributes(
 		attribute.String("db.system", "postgresql"),
 		attribute.String("db.operation", "SELECT"),
 		attribute.String("db.table", "accounts"),
+		attribute.String("db.account.id", id),
 	)
 
 	r.logger.Info("executing query",
-		zap.String("query", "SELECT accounts"),
+		zap.String("query", "SELECT accounts by id"),
 		zap.String("account.id", id),
 	)
 
@@ -135,20 +179,14 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 		return nil, &models.SnapInternalError
 	}
 
-	span.SetAttributes(
-		attribute.String("db.result.id", account.ID.String()),
-	)
-
-	r.logger.Info("query success",
-		zap.String("db.result.id", account.ID.String()),
-	)
-
+	span.SetAttributes(attribute.String("db.result.id", account.ID.String()))
+	r.logger.Info("query success", zap.String("db.result.id", account.ID.String()))
 	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return &account, nil
 }
 
-// Get Transaction by Account Id
+// GET transaction by id
 func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
@@ -156,10 +194,26 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 	defer span.End()
 	operation := "select_transactions_by_account"
 
-	baseQuery := `SELECT id, from_account_id, from_bank_code, to_account_id, to_bank_code, amount, note, created_at FROM transactions`
+	baseQuery := `
+		SELECT
+			id,
+			from_account_id,
+			to_account_id,
+			amount,
+			currency,
+			reference_no,
+			partner_reference_no,
+			external_id,
+			status,
+			note,
+			additional_info,
+			created_at,
+			updated_at
+		FROM transactions`
 
 	var whereQuery string
-	orderByQuery := "ORDER BY created_at desc"
+	orderByQuery := "ORDER BY created_at DESC"
+
 	switch trxType {
 	case "all":
 		whereQuery = "WHERE from_account_id = $1 OR to_account_id = $2"
@@ -167,6 +221,8 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		whereQuery = "WHERE to_account_id = $1"
 	case "out":
 		whereQuery = "WHERE from_account_id = $1"
+	default:
+		whereQuery = "WHERE from_account_id = $1 OR to_account_id = $2"
 	}
 
 	query := baseQuery + " " + whereQuery + " " + orderByQuery
@@ -185,7 +241,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 	}
 
 	r.logger.Info("executing query",
-		zap.String("query", "SELECT transactions"),
+		zap.String("query", "SELECT transactions by account"),
 		zap.String("account.id", id),
 		zap.String("trx.type", logTrxType),
 	)
@@ -194,7 +250,7 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 
 	var err error
 	dbStart := time.Now()
-	if trxType == "all" {
+	if trxType == "all" || trxType == "" {
 		err = r.db.SelectContext(ctx, &transactions, query, id, id)
 	} else {
 		err = r.db.SelectContext(ctx, &transactions, query, id)
@@ -206,7 +262,6 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
-
 		r.logger.Error("query failed", zap.Error(err))
 		return nil, &models.SnapInternalError
 	}
@@ -215,16 +270,12 @@ func (r *accountRepository) GetTransactionsByAccountId(ctx context.Context, id s
 		transactions = []models.Transaction{}
 	}
 
-	span.SetAttributes(
-		attribute.Int("db.result.count", len(transactions)),
-	)
-
+	span.SetAttributes(attribute.Int("db.result.count", len(transactions)))
 	r.logger.Info("query success",
 		zap.String("account.id", id),
 		zap.String("trx.type", logTrxType),
 		zap.Int("count", len(transactions)),
 	)
-
 	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return transactions, nil
@@ -238,21 +289,71 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 	defer span.End()
 	operation := "insert"
 
-	query := `INSERT INTO accounts (bank_code, account_number, account_holder, balance) VALUES ($1, $2, $3, $4) RETURNING id`
+	query := `
+		INSERT INTO accounts (
+			bank_code,
+			account_number,
+			account_holder,
+			reference_no,
+			partner_reference_no,
+			balance,
+			currency,
+			email,
+			phone_no,
+			country_code,
+			lang,
+			locale,
+			merchant_id,
+			sub_merchant_id,
+			onboarding_partner,
+			terminal_type,
+			scopes,
+			redirect_url,
+			additional_info
+		) VALUES (
+			$1, $2, $3, $4, $5,
+			$6, $7, $8, $9, $10,
+			$11, $12, $13, $14, $15,
+			$16, $17, $18, $19 
+		) RETURNING id`
 
 	span.SetAttributes(
 		attribute.String("db.system", "postgresql"),
 		attribute.String("db.operation", "INSERT"),
 		attribute.String("db.table", "accounts"),
+		attribute.String("snap.partner_ref", account.PartnerReferenceNo),
 	)
 
 	r.logger.Info("executing query",
 		zap.String("query", "INSERT accounts"),
+		zap.String("reference_no", account.ReferenceNo),
+		zap.String("partner_reference_no", account.PartnerReferenceNo),
 	)
 
 	var newId string
 	dbStart := time.Now()
-	err := r.db.QueryRowxContext(ctx, query, account.BankCode, account.AccountNumber, account.AccountHolder, account.Balance).Scan(&newId)
+	err := r.db.QueryRowxContext(ctx, query,
+		account.BankCode,           // $1
+		account.AccountNumber,      // $2
+		account.AccountHolder,      // $3
+		account.ReferenceNo,        // $4
+		account.PartnerReferenceNo, // $5
+		account.Balance,            // $6
+		account.Currency,           // $7
+		account.Email,              // $8
+		account.PhoneNo,            // $9
+		account.CountryCode,        // $10
+		account.Lang,               // $11
+		account.Locale,             // $12
+		account.MerchantID,         // $13
+		account.SubMerchantID,      // $14
+		account.OnboardingPartner,  // $15
+		account.TerminalType,       // $16
+		account.Scopes,             // $17
+		account.RedirectURL,        // $18
+		account.AdditionalInfo,     // $19
+	).Scan(&newId)
+
 	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).
 		Observe(time.Since(dbStart).Seconds())
 
@@ -262,7 +363,6 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 		metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "error").Inc()
 
 		if pqErr, ok := err.(*pq.Error); ok {
-			// [23505] Unique Violation
 			if pqErr.Code == "23505" {
 				r.logger.Error(models.ErrDuplicateAccount.Error(), zap.Error(err))
 				return "", &models.SnapDuplicateExtID
@@ -273,14 +373,8 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 		return "", &models.SnapInternalError
 	}
 
-	span.SetAttributes(
-		attribute.String("db.result.id", newId),
-	)
-
-	r.logger.Info("query success",
-		zap.String("db.result.id", newId),
-	)
-
+	span.SetAttributes(attribute.String("db.result.id", newId))
+	r.logger.Info("query success", zap.String("db.result.id", newId))
 	metrics.DBQueryTotal.WithLabelValues(repoAccount, operation, "success").Inc()
 
 	return newId, nil

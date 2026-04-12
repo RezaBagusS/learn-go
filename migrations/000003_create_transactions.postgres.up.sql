@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     to_account_id VARCHAR(50) NOT NULL,
     amount DECIMAL(16, 2) NOT NULL,
     currency VARCHAR(5) DEFAULT 'IDR',
-    -- Perbaikan: Memastikan pemanggilan fungsi dalam default tertata dengan benar
     reference_no VARCHAR(64) UNIQUE DEFAULT (
         'TRX' || to_char(CURRENT_DATE, 'YYYYMMDD') || lpad(nextval('transaction_ref_seq')::text, 12, '0')
     ),

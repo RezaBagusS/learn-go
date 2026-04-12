@@ -743,7 +743,7 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			SourceAccount:        payload.SourceAccountNo,
 			TransactionDate:      payload.TransactionDate,
 			OriginatorInfos:      payload.OriginatorInfos,
-			AdditionalInfo:       payload.AdditionalInfo, // ini masih oke karena response pakai struct
+			AdditionalInfo:       payload.AdditionalInfo,
 		}
 
 		dto.WriteResponse(
