@@ -59,8 +59,6 @@ func (r *transactionRepository) GetAllTransactions(ctx context.Context) ([]model
 			reference_no,
 			partner_reference_no,
 			external_id,
-			response_code,
-			response_message,
 			status,
 			note,
 			additional_info,
@@ -136,8 +134,6 @@ func (r *transactionRepository) GetSummary(ctx context.Context, date time.Time) 
 			reference_no,
 			partner_reference_no,
 			external_id,
-			response_code,
-			response_message,
 			status,
 			note,
 			additional_info,
@@ -210,8 +206,6 @@ func (r *transactionRepository) GetTransactionById(ctx context.Context, id strin
 			reference_no,
 			partner_reference_no,
 			external_id,
-			response_code,
-			response_message,
 			status,
 			note,
 			additional_info,
@@ -532,17 +526,17 @@ func (r *transactionRepository) TransferIntraBank(ctx context.Context, trx model
 	queryInsert := `
 		INSERT INTO transactions (
 			from_account_id, to_account_id, amount, currency,
-			partner_reference_no, external_id, response_code,
-			response_message, status, note, additional_info
+			partner_reference_no, external_id, 
+			status, note, additional_info
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING reference_no`
 
 	dbStart := time.Now()
 	err = tx.QueryRowContext(ctx, queryInsert,
 		trx.FromAccountID, trx.ToAccountID, trx.Amount, trx.Currency,
-		trx.PartnerRefNo, trx.ExternalID, trx.ResponseCode,
-		trx.ResponseMessage, trx.Status, trx.Note, trx.AdditionalInfo,
+		trx.PartnerRefNo, trx.ExternalID,
+		trx.Status, trx.Note, trx.AdditionalInfo,
 	).Scan(&referenceNo)
 	metrics.DBQueryDuration.WithLabelValues(repoTransaction, operation).Observe(time.Since(dbStart).Seconds())
 

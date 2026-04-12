@@ -17,8 +17,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     ),
     partner_reference_no VARCHAR(64) NOT NULL,
     external_id VARCHAR(64),
-    response_code VARCHAR(10),
-    response_message VARCHAR(255),
     status VARCHAR(20) DEFAULT 'PENDING',
     note TEXT,
     additional_info JSONB,

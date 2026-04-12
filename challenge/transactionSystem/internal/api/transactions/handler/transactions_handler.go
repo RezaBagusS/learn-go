@@ -23,28 +23,31 @@ import (
 )
 
 type TransactionsHandler struct {
-	mux         *http.ServeMux
-	svc         service.TransactionService
-	rdb         *redis.Client
-	keyManager  *helper.RedisKeyManager
-	idempotency *middleware.IdempotencyMiddleware
-	logger      *zap.Logger
+	mux               *http.ServeMux
+	svc               service.TransactionService
+	rdb               *redis.Client
+	keyManager        *helper.RedisKeyManager
+	accountKeyManager *helper.RedisKeyManager
+	idempotency       *middleware.IdempotencyMiddleware
+	logger            *zap.Logger
 }
 
 func NewTransactionsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *TransactionsHandler {
 	trxRepo := repository.NewtransactionRepository(db)
 	TrxSvc := service.NewTransactionsService(trxRepo)
 	keyManager := helper.NewRedisKeyManager("transaction_system", config.DOMAIN_TRANSACTION)
+	accountKeyManager := helper.NewRedisKeyManager("transaction_system", config.DOMAIN_ACCOUNT)
 	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
 	logger := helper.Log
 
 	return &TransactionsHandler{
-		mux:         mux,
-		svc:         TrxSvc,
-		rdb:         rdb,
-		keyManager:  keyManager,
-		idempotency: idempotency,
-		logger:      logger,
+		mux:               mux,
+		svc:               TrxSvc,
+		rdb:               rdb,
+		keyManager:        keyManager,
+		accountKeyManager: accountKeyManager,
+		idempotency:       idempotency,
+		logger:            logger,
 	}
 }
 
@@ -510,6 +513,8 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 		ctx := r.Context()
 		span, tracer := middleware.AllCtx(ctx)
 		key := "transfer_intra_bank"
+		keyList := "account_list"
+		keyId := "account_id"
 		accountId := r.Header.Get("X-ACCOUNT-ID")
 		svcCode := config.SVC_CODE_TRANSFER_INTRABANK
 
@@ -615,19 +620,35 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			return
 		}
 
-		// Invalidate transaction_list cache
+		// Invalidate cache
 		cacheKey := h.keyManager.Generate(config.REDIS_KEY_TRANSACTION_LIST)
+		cacheKeyList := h.accountKeyManager.Generate(config.REDIS_KEY_ACCOUNT_LIST)
+		cacheKeyIdSender := h.accountKeyManager.Generate(config.REDIS_KEY_ACCOUNT_ID, payload.SourceAccountNo)
+		cacheKeyIdReceiver := h.accountKeyManager.Generate(config.REDIS_KEY_ACCOUNT_ID, payload.BeneficiaryAccountNo)
+		h.logger.Info("Invalidate cache : ",
+			zap.String("cache.transactionList", cacheKey),
+			zap.String("cache.accountList", cacheKeyList),
+			zap.String("cache.accountSender", cacheKeyIdSender),
+			zap.String("cache.accountReceiver", cacheKeyIdReceiver),
+		)
 		cacheStart := time.Now()
-		if err := h.rdb.Del(ctx, cacheKey).Err(); err != nil {
+
+		if err := h.rdb.Del(ctx, cacheKey, cacheKeyList, cacheKeyIdSender, cacheKeyIdReceiver).Err(); err != nil {
+			// if err := h.rdb.Del(ctx, cacheKeyIdReceiver).Err(); err != nil {
 			metrics.CacheRequestsTotal.WithLabelValues(key, "error").Inc()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, models.ErrRedisInvalidate.Error())
 			h.logger.Error(models.ErrRedisInvalidate.Error(), zap.Error(err))
 		} else {
+			h.logger.Info("Invalidate cache")
 			metrics.CacheRequestsTotal.WithLabelValues(key, "invalidate").Inc()
 			span.AddEvent("Cache Invalidated")
 		}
 
+		metrics.CacheDuration.WithLabelValues("invalidate", keyList).
+			Observe(time.Since(cacheStart).Seconds())
+		metrics.CacheDuration.WithLabelValues("invalidate", keyId).
+			Observe(time.Since(cacheStart).Seconds())
 		metrics.CacheDuration.WithLabelValues("invalidate", key).
 			Observe(time.Since(cacheStart).Seconds())
 

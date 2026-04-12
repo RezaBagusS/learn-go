@@ -279,19 +279,17 @@ func (s *transactionService) TransferIntrabank(ctx context.Context, accountID st
 	}
 
 	trx := models.Transaction{
-		FromAccountID:   payload.SourceAccountNo,
-		ToAccountID:     payload.BeneficiaryAccountNo,
-		Amount:          amountValue,
-		Currency:        payload.Amount.Currency,
-		PartnerRefNo:    payload.PartnerReferenceNo,
-		ExternalID:      header.ExternalID,
-		ResponseCode:    "2001700",
-		ResponseMessage: "Request has been processed successfully",
-		Status:          "SUCCESS",
-		Note:            payload.Remark, // fix: Remark bukan CustomerReference
-		AdditionalInfo:  additionalInfoBytes,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		FromAccountID:  payload.SourceAccountNo,
+		ToAccountID:    payload.BeneficiaryAccountNo,
+		Amount:         amountValue,
+		Currency:       payload.Amount.Currency,
+		PartnerRefNo:   payload.PartnerReferenceNo,
+		ExternalID:     header.ExternalID,
+		Status:         "SUCCESS",
+		Note:           payload.Remark, // fix: Remark bukan CustomerReference
+		AdditionalInfo: additionalInfoBytes,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	s.logger.Info("persisting transaction to database")

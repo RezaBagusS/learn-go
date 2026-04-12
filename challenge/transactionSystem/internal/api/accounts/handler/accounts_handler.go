@@ -646,7 +646,7 @@ func (h *AccountsHandler) Update() http.HandlerFunc {
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			fmt.Sprintf("Berhasil menghapus akun dengan id : %s", idStr),
+			fmt.Sprintf("Berhasil mengupdate akun dengan id : %s", idStr),
 			map[string]any{
 				"id": updatedId,
 			},

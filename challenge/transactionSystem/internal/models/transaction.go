@@ -94,9 +94,7 @@ type Transaction struct {
 	ExternalID   string `db:"external_id" json:"external_id"`                   // Dari Header SNAP
 
 	// Status & Log
-	ResponseCode    string `db:"response_code" json:"response_code"`       // Contoh: 2001700
-	ResponseMessage string `db:"response_message" json:"response_message"` // Contoh: Success
-	Status          string `db:"status" json:"status"`                     // SUCCESS/FAILED/PENDING
+	Status string `db:"status" json:"status"` // SUCCESS/FAILED/PENDING
 
 	// Informasi Tambahan
 	Note           string          `db:"note" json:"note"`
