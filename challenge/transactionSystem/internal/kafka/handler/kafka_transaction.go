@@ -19,7 +19,7 @@ func NewTransactionKafkaHandler(logger *zap.Logger) *TransactionKafkaHandler {
 // HandleCreated — logic setelah transaction.created diterima
 // Cache invalidation sudah dilakukan di HTTP handler,
 // jadi di sini hanya untuk keperluan audit/monitoring
-func (h *TransactionKafkaHandler) HandleCreated(ctx context.Context, event kafka.TransactionCreatedEvent) error {
+func (h *TransactionKafkaHandler) HandleTransferCreated(ctx context.Context, event kafka.TransactionCreatedEvent) error {
 	h.logger.Info("transaction.created event consumed",
 		zap.String("transaction_id", event.TransactionID),
 		zap.String("sender", event.SenderAccount),
@@ -38,7 +38,7 @@ func (h *TransactionKafkaHandler) HandleCreated(ctx context.Context, event kafka
 }
 
 // HandleFailed — logic setelah transaction.failed diterima
-func (h *TransactionKafkaHandler) HandleFailed(ctx context.Context, event kafka.TransactionFailedEvent) error {
+func (h *TransactionKafkaHandler) HandleTransferFailed(ctx context.Context, event kafka.TransactionFailedEvent) error {
 	h.logger.Warn("transaction.failed event consumed",
 		zap.String("transaction_id", event.TransactionID),
 		zap.String("sender", event.SenderAccount),
@@ -57,7 +57,7 @@ func (h *TransactionKafkaHandler) HandleFailed(ctx context.Context, event kafka.
 }
 
 // HandleBalanceUpdated — logic setelah account.balance.updated diterima
-func (h *TransactionKafkaHandler) HandleBalanceUpdated(ctx context.Context, event kafka.AccountBalanceUpdatedEvent) error {
+func (h *TransactionKafkaHandler) HandleTransferBalanceUpdated(ctx context.Context, event kafka.AccountBalanceUpdatedEvent) error {
 	h.logger.Info("account.balance.updated event consumed",
 		zap.String("account_no", event.AccountNo),
 		zap.Float64("amount", event.Amount),

@@ -8,6 +8,7 @@ import (
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/service"
 	bankRepository "belajar-go/challenge/transactionSystem/internal/api/banks/repository"
 	bankService "belajar-go/challenge/transactionSystem/internal/api/banks/service"
+	"belajar-go/challenge/transactionSystem/internal/kafka"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
@@ -33,9 +34,10 @@ type AccountsHandler struct {
 	keyManager  *helper.RedisKeyManager
 	idempotency *middleware.IdempotencyMiddleware
 	logger      *zap.Logger
+	producer    *kafka.Producer
 }
 
-func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *AccountsHandler {
+func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client, producer *kafka.Producer) *AccountsHandler {
 
 	keyManager := helper.NewRedisKeyManager("transaction_system", config.DOMAIN_ACCOUNT)
 	idempotency := middleware.NewIdempotencyMiddleware(rdb, keyManager)
@@ -52,6 +54,7 @@ func NewAccountsHandler(mux *http.ServeMux, db *sqlx.DB, rdb *redis.Client) *Acc
 		keyManager:  keyManager,
 		idempotency: idempotency,
 		logger:      logger,
+		producer:    producer,
 	}
 }
 
@@ -573,6 +576,7 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			zap.String("redirect_url", payload.RedirectURL),
 		)
 
+		// --- Proses create via service ---
 		svcCtx, svcSpan := tracer.Start(ctx, "Create-Account")
 		svcSpan.SetAttributes(
 			attribute.String("db.partner_reference_no", payload.PartnerReferenceNo),
@@ -586,10 +590,29 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 		newAccount, snapErr := h.svc.CreateNewAccount(svcCtx, payload)
 		svcSpan.End()
 
+		// --- publish AccountFailedEvent ---
 		if snapErr != nil {
 			prefixError := errors.New(snapErr.ResponseMessage)
 			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
 			span.RecordError(prefixError)
+			span.SetStatus(codes.Error, snapErr.ResponseMessage)
+
+			failedEvent := kafka.AccountFailedEvent{
+				PartnerReferenceNo: payload.PartnerReferenceNo,
+				CustomerID:         payload.CustomerID,
+				MerchantID:         payload.MerchantID,
+				PartnerID:          r.Header.Get("X-PARTNER-ID"),
+				ExternalID:         r.Header.Get("X-EXTERNAL-ID"),
+				ErrorCode:          snapErr.GetResponseCode(svcCode),
+				HttpCode:           snapErr.HttpCode,
+				ErrorMessage:       snapErr.ResponseMessage,
+				Timestamp:          time.Now(),
+			}
+
+			if pubErr := h.producer.Publish(ctx, kafka.TopicAccountFailed, payload.PartnerReferenceNo, failedEvent); pubErr != nil {
+				h.logger.Error("failed to publish account.failed event", zap.Error(pubErr))
+			}
+
 			dto.WriteError(
 				w,
 				snapErr.HttpCode,
@@ -616,6 +639,25 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			Observe(time.Since(cacheStart).Seconds())
 
 		span.SetAttributes(attribute.String("handler.result.id", newAccount.AccountID))
+
+		// --- publish AccountSucceedEvent ---
+		createdEvent := kafka.AccountCreatedEvent{
+			AccountID:          newAccount.AccountID,
+			ReferenceNo:        newAccount.ReferenceNo,
+			PartnerReferenceNo: newAccount.PartnerReferenceNo,
+			Name:               payload.Name,
+			Email:              payload.Email,
+			CustomerID:         payload.CustomerID,
+			PartnerID:          r.Header.Get("X-PARTNER-ID"),
+			ExternalID:         r.Header.Get("X-EXTERNAL-ID"),
+			BankCode:           payload.BankCode,
+			AuthCode:           newAccount.AuthCode,
+			State:              newAccount.State,
+			CreatedAt:          time.Now(),
+		}
+		if pubErr := h.producer.Publish(ctx, kafka.TopicAccountCreated, newAccount.ReferenceNo, createdEvent); pubErr != nil {
+			h.logger.Error("failed to publish account.created event", zap.Error(pubErr))
+		}
 
 		h.logger.Info("Berhasil membuat data akun baru",
 			zap.String("source", "database"),

@@ -51,7 +51,7 @@ func (s *Server) registerRoutes() {
 	oauthHandler.MapRoutes(s.obs)
 
 	// Account Domain =====
-	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db, s.rdb)
+	accHandler := accountHandler.NewAccountsHandler(s.mux, s.db, s.rdb, s.producer)
 	accHandler.MapRoutes(s.obs)
 
 	// Bank Domain =====
@@ -71,24 +71,37 @@ func (s *Server) startConsumers(brokers []string) {
 
 	logger := helper.Log
 	trxKafkaHandler := kafkahandler.NewTransactionKafkaHandler(logger)
+	accKafkaHandler := kafkahandler.NewAccountKafkaHandler(logger)
 
 	// Consumer: transaction.created
-	createdConsumer := kafka.NewConsumer[kafka.TransactionCreatedEvent](
+	TrxCreatedConsumer := kafka.NewConsumer[kafka.TransactionCreatedEvent](
 		brokers, kafka.TopicTransactionCreated, "transaction-service", logger,
 	)
-	createdConsumer.Start(ctx, trxKafkaHandler.HandleCreated)
+	TrxCreatedConsumer.Start(ctx, trxKafkaHandler.HandleTransferCreated)
 
 	// Consumer: transaction.failed
-	failedConsumer := kafka.NewConsumer[kafka.TransactionFailedEvent](
+	TrxFailedConsumer := kafka.NewConsumer[kafka.TransactionFailedEvent](
 		brokers, kafka.TopicTransactionFailed, "transaction-service", logger,
 	)
-	failedConsumer.Start(ctx, trxKafkaHandler.HandleFailed)
+	TrxFailedConsumer.Start(ctx, trxKafkaHandler.HandleTransferFailed)
 
 	// Consumer: account.balance.updated
 	balanceConsumer := kafka.NewConsumer[kafka.AccountBalanceUpdatedEvent](
 		brokers, kafka.TopicAccountBalanceUpdated, "transaction-service", logger,
 	)
-	balanceConsumer.Start(ctx, trxKafkaHandler.HandleBalanceUpdated)
+	balanceConsumer.Start(ctx, trxKafkaHandler.HandleTransferBalanceUpdated)
+
+	// Consumer: account.created
+	AccCreatedConsumer := kafka.NewConsumer[kafka.AccountCreatedEvent](
+		brokers, kafka.TopicAccountCreated, "account-service", logger,
+	)
+	AccCreatedConsumer.Start(ctx, accKafkaHandler.HandleAccountCreated)
+
+	// Consumer: account.failed
+	AccFailedConsumer := kafka.NewConsumer[kafka.AccountFailedEvent](
+		brokers, kafka.TopicAccountFailed, "account-service", logger,
+	)
+	AccFailedConsumer.Start(ctx, accKafkaHandler.HandleAccountFailed)
 
 	logger.Info("kafka consumers started")
 }
