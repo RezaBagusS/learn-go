@@ -52,3 +52,10 @@ func GenerateAPIKey() string {
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+func GenerateAccountNumber() string {
+	paddedPartnerID := fmt.Sprintf("%s", bankCodePadded)
+
+	customerNo := generateRandomNumeric(15)
+	return paddedPartnerID + customerNo
+}

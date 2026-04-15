@@ -1,8 +1,9 @@
 CREATE TABLE IF NOT EXISTS accounts (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bank_code      VARCHAR(50) NOT NULL REFERENCES banks(bank_code),
-    account_number VARCHAR(50) NOT NULL, -- CustomerID
+    account_number VARCHAR(50) NOT NULL,
     account_holder VARCHAR(150) NOT NULL, -- Name
+    customer_id    VARCHAR(50) NOT NULL,
 
     -- Partner & Reference
     reference_no        VARCHAR(100) UNIQUE NOT NULL,       

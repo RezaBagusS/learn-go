@@ -45,6 +45,8 @@ type AccountCreateRequest struct {
 	State              string         `json:"state"`
 	MerchantID         string         `json:"merchant_id"`
 	SubMerchantID      string         `json:"sub_merchant_id"`
+	PartnerID          string         `json:"partner_id"`
+	ExternalID         string         `json:"external_id"`
 	TerminalType       string         `json:"terminal_type"`
 	AdditionalInfo     AdditionalInfo `json:"additional_info"`
 }
@@ -64,14 +66,15 @@ type Account struct {
 	BankCode      string    `db:"bank_code"       json:"bank_code"`
 	AccountNumber string    `db:"account_number"  json:"account_number"`
 	AccountHolder string    `db:"account_holder"  json:"account_holder"`
+	CustomerID    string    `db:"customer_id"  json:"customer_id"`
 
 	// Referensi & Tracking
 	ReferenceNo        string `db:"reference_no"        json:"reference_no"`
 	PartnerReferenceNo string `db:"partner_reference_no" json:"partner_reference_no"`
 
 	// Balance
-	Balance  int64  `db:"balance"  json:"balance"`
-	Currency string `db:"currency" json:"currency"`
+	Balance  float64 `db:"balance"  json:"balance"`
+	Currency string  `db:"currency" json:"currency"`
 
 	// Customer Info
 	Email       string `db:"email"        json:"email"`

@@ -45,6 +45,9 @@ func (h *TransactionKafkaHandler) HandleTransferFailed(ctx context.Context, even
 		zap.String("receiver", event.ReceiverAccount),
 		zap.Float64("amount", event.Amount),
 		zap.String("reason", event.Reason),
+		zap.String("error_code", event.ErrorCode),
+		zap.String("error_message", event.ErrorMessage),
+		zap.Int("http_code", event.HttpCode),
 		zap.Time("failed_at", event.FailedAt),
 	)
 

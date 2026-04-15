@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -135,7 +134,9 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 						w,
 						models.SnapSuccess.HttpCode,
 						models.SnapSuccess.GetResponseCode(svcCode),
-						models.SnapSuccess.ResponseMessage, map[string]any{
+						// models.SnapSuccess.ResponseMessage,
+						"Berhasil mendapatkan list data transaksi",
+						map[string]any{
 							"transactions": transactions,
 						})
 					return
@@ -186,7 +187,8 @@ func (h *TransactionsHandler) GetAll() http.HandlerFunc {
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			models.SnapSuccess.ResponseMessage,
+			// models.SnapSuccess.ResponseMessage,
+			"Berhasil mendapatkan list data transaksi",
 			map[string]any{
 				"transactions": transactions,
 			})
@@ -215,7 +217,8 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 				w,
 				models.SnapInvalidFormat.HttpCode,
 				models.SnapInvalidFormat.GetResponseCode(svcCode),
-				models.SnapInvalidFormat.ResponseMessage,
+				// models.SnapInvalidFormat.ResponseMessage,
+				"Data tanggal tidak valid",
 			)
 			return
 		}
@@ -257,7 +260,9 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 						w,
 						models.SnapSuccess.HttpCode,
 						models.SnapSuccess.GetResponseCode(svcCode),
-						models.SnapSuccess.ResponseMessage, map[string]any{
+						// models.SnapSuccess.ResponseMessage,
+						"Berhasil mendapatkan list data transaksi berdasarkan tanggal",
+						map[string]any{
 							"transactions": transactions,
 						})
 					return
@@ -312,7 +317,9 @@ func (h *TransactionsHandler) GetSummary() http.HandlerFunc {
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			models.SnapSuccess.ResponseMessage, map[string]any{
+			// models.SnapSuccess.ResponseMessage,
+			"Berhasil mendapatkan list data transaksi berdasarkan tanggal",
+			map[string]any{
 				"transactions": transactions,
 			})
 	}
@@ -337,7 +344,8 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 				w,
 				models.SnapInvalidFormat.HttpCode,
 				models.SnapInvalidFormat.GetResponseCode(svcCode),
-				models.SnapInvalidFormat.ResponseMessage,
+				// models.SnapInvalidFormat.ResponseMessage,
+				"UUID tidak valid",
 			)
 			return
 		}
@@ -378,7 +386,9 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 						w,
 						models.SnapSuccess.HttpCode,
 						models.SnapSuccess.GetResponseCode(svcCode),
-						models.SnapSuccess.ResponseMessage, map[string]any{
+						// models.SnapSuccess.ResponseMessage,
+						"Berhasil mendapatkan data transaksi",
+						map[string]any{
 							"transaction": transaction,
 						})
 					return
@@ -431,7 +441,9 @@ func (h *TransactionsHandler) GetById() http.HandlerFunc {
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			models.SnapSuccess.ResponseMessage, map[string]any{
+			// models.SnapSuccess.ResponseMessage,
+			"Berhasil mendapatkan data transaksi",
+			map[string]any{
 				"transaction": transaction,
 			})
 	}
@@ -538,7 +550,8 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 				w,
 				models.SnapUnauthorized.HttpCode,
 				models.SnapUnauthorized.GetResponseCode(svcCode),
-				models.SnapUnauthorized.ResponseMessage,
+				// models.SnapUnauthorized.ResponseMessage,
+				"Header tidak lengkap",
 			)
 			return
 		}
@@ -564,7 +577,8 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 				w,
 				models.SnapInvalidFormat.HttpCode,
 				models.SnapInvalidFormat.GetResponseCode(svcCode),
-				models.SnapInvalidFormat.ResponseMessage,
+				// models.SnapInvalidFormat.ResponseMessage,
+				err.Error(),
 			)
 			return
 		}
@@ -583,7 +597,8 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 				w,
 				models.SnapMandatoryField.HttpCode,
 				models.SnapMandatoryField.GetResponseCode(svcCode),
-				models.SnapMandatoryField.ResponseMessage,
+				// models.SnapMandatoryField.ResponseMessage,
+				"Payload tidak lengkap",
 			)
 			return
 		}
@@ -605,10 +620,12 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			attribute.String("db.beneficiary_account_no", payload.BeneficiaryAccountNo),
 			attribute.String("db.amount", payload.Amount.Value),
 		)
-		referenceNo, err := h.svc.TransferIntrabank(svcCtx, accountId, snapHeader, payload)
+
+		payload.ExternalID = snapHeader.ExternalID
+
+		referenceNo, err := h.svc.TransferIntrabank(svcCtx, accountId, h.producer, payload, svcCode)
 		svcSpan.End()
 
-		// --- publish TransactionFailedEvent ---
 		if err != nil {
 
 			er := errors.New(err.ResponseMessage)
@@ -616,21 +633,6 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			h.logger.Error(err.ResponseMessage, zap.Error(er))
 			span.RecordError(er)
 			span.SetStatus(codes.Error, err.ResponseMessage)
-
-			amountFloat, _ := strconv.ParseFloat(payload.Amount.Value, 64)
-
-			failedEvent := kafka.TransactionFailedEvent{
-				TransactionID:   payload.PartnerReferenceNo, // referenceNo belum ada saat gagal
-				SenderAccount:   payload.SourceAccountNo,
-				ReceiverAccount: payload.BeneficiaryAccountNo,
-				Amount:          amountFloat,
-				Reason:          err.ResponseMessage,
-				FailedAt:        time.Now(),
-			}
-
-			if pubErr := h.producer.Publish(ctx, kafka.TopicTransactionFailed, payload.PartnerReferenceNo, failedEvent); pubErr != nil {
-				h.logger.Error("failed to publish transaction.failed event", zap.Error(pubErr))
-			}
 
 			dto.WriteError(
 				w,
@@ -686,43 +688,6 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			}
 		}
 
-		// --- publish TransactionSucceedEvent ---
-		amountFloat, _ := strconv.ParseFloat(payload.Amount.Value, 64)
-		createdEvent := kafka.TransactionCreatedEvent{
-			TransactionID:   referenceNo,
-			SenderAccount:   payload.SourceAccountNo,
-			ReceiverAccount: payload.BeneficiaryAccountNo,
-			Amount:          amountFloat,
-			Currency:        payload.Amount.Currency,
-			CreatedAt:       time.Now(),
-		}
-		if pubErr := h.producer.Publish(ctx, kafka.TopicTransactionCreated, referenceNo, createdEvent); pubErr != nil {
-			h.logger.Error("failed to publish transaction.created event", zap.Error(pubErr))
-		}
-
-		// --- publish BalanceUpdatedEvent ---
-		// For Sender
-		senderEvent := kafka.AccountBalanceUpdatedEvent{
-			AccountNo: payload.SourceAccountNo,
-			Amount:    amountFloat,
-			Type:      "out",
-			UpdatedAt: time.Now(),
-		}
-		if pubErr := h.producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.SourceAccountNo, senderEvent); pubErr != nil {
-			h.logger.Error("failed to publish account.balance.updated event (sender)", zap.Error(pubErr))
-		}
-
-		// For Receiver
-		receiverEvent := kafka.AccountBalanceUpdatedEvent{
-			AccountNo: payload.BeneficiaryAccountNo,
-			Amount:    amountFloat,
-			Type:      "in",
-			UpdatedAt: time.Now(),
-		}
-		if pubErr := h.producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.BeneficiaryAccountNo, receiverEvent); pubErr != nil {
-			h.logger.Error("failed to publish account.balance.updated event (receiver)", zap.Error(pubErr))
-		}
-
 		span.SetStatus(codes.Ok, "transfer intrabank berhasil")
 		span.SetAttributes(attribute.String("snap.reference_no", referenceNo))
 
@@ -750,6 +715,9 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			models.SnapSuccess.ResponseMessage, responseBody)
+			// models.SnapSuccess.ResponseMessage,
+			"Transfer berhasil dilakukan",
+			responseBody,
+		)
 	}
 }

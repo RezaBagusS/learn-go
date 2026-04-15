@@ -19,6 +19,9 @@ type TransactionFailedEvent struct {
 	ReceiverAccount string    `json:"receiver_id"`
 	Amount          float64   `json:"amount"`
 	Reason          string    `json:"reason"`
+	ErrorCode       string    `json:"error_code"`
+	ErrorMessage    string    `json:"error_message"`
+	HttpCode        int       `json:"http_code"`
 	FailedAt        time.Time `json:"failed_at"`
 }
 
@@ -56,5 +59,5 @@ type AccountFailedEvent struct {
 	ErrorCode          string    `json:"error_code"`
 	ErrorMessage       string    `json:"error_message"`
 	HttpCode           int       `json:"http_code"`
-	Timestamp          time.Time `json:"timestamp"`
+	FailedAt           time.Time `json:"failed_at"`
 }

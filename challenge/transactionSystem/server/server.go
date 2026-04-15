@@ -114,10 +114,3 @@ func (s *Server) Run() {
 	fmt.Printf("Server berjalan di %s:%s\n", addr, port)
 	log.Fatal(http.ListenAndServe(listen, middleware.ErrorHandling(s.mux)))
 }
-
-func (s *Server) Shutdown() {
-	if s.stopFn != nil {
-		s.stopFn()
-	}
-	s.producer.Close()
-}

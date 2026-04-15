@@ -506,7 +506,8 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 				w,
 				models.SnapUnauthorized.HttpCode,
 				models.SnapUnauthorized.GetResponseCode(svcCode),
-				models.SnapUnauthorized.ResponseMessage,
+				// models.SnapUnauthorized.ResponseMessage,
+				"Header tidak lengkap",
 			)
 			return
 		}
@@ -532,7 +533,8 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 				w,
 				models.SnapInvalidFormat.HttpCode,
 				models.SnapInvalidFormat.GetResponseCode(svcCode),
-				models.SnapInvalidFormat.ResponseMessage,
+				// models.SnapInvalidFormat.ResponseMessage,
+				"Format payload tidak valid",
 			)
 			return
 		}
@@ -560,7 +562,8 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 				w,
 				models.SnapMandatoryField.HttpCode,
 				models.SnapMandatoryField.GetResponseCode(svcCode),
-				models.SnapMandatoryField.ResponseMessage,
+				// models.SnapMandatoryField.ResponseMessage,
+				"Payload tidak lengkap",
 			)
 			return
 		}
@@ -587,31 +590,18 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			attribute.String("db.phone_no", payload.PhoneNo),
 			attribute.String("db.merchant_id", payload.MerchantID),
 		)
-		newAccount, snapErr := h.svc.CreateNewAccount(svcCtx, payload)
+
+		payload.ExternalID = snapHeader.ExternalID
+		payload.PartnerID = snapHeader.PartnerID
+
+		newAccount, snapErr := h.svc.CreateNewAccount(svcCtx, payload, h.producer, svcCode)
 		svcSpan.End()
 
-		// --- publish AccountFailedEvent ---
 		if snapErr != nil {
 			prefixError := errors.New(snapErr.ResponseMessage)
 			h.logger.Error(prefixError.Error(), zap.Error(prefixError))
 			span.RecordError(prefixError)
 			span.SetStatus(codes.Error, snapErr.ResponseMessage)
-
-			failedEvent := kafka.AccountFailedEvent{
-				PartnerReferenceNo: payload.PartnerReferenceNo,
-				CustomerID:         payload.CustomerID,
-				MerchantID:         payload.MerchantID,
-				PartnerID:          r.Header.Get("X-PARTNER-ID"),
-				ExternalID:         r.Header.Get("X-EXTERNAL-ID"),
-				ErrorCode:          snapErr.GetResponseCode(svcCode),
-				HttpCode:           snapErr.HttpCode,
-				ErrorMessage:       snapErr.ResponseMessage,
-				Timestamp:          time.Now(),
-			}
-
-			if pubErr := h.producer.Publish(ctx, kafka.TopicAccountFailed, payload.PartnerReferenceNo, failedEvent); pubErr != nil {
-				h.logger.Error("failed to publish account.failed event", zap.Error(pubErr))
-			}
 
 			dto.WriteError(
 				w,
@@ -640,25 +630,6 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 
 		span.SetAttributes(attribute.String("handler.result.id", newAccount.AccountID))
 
-		// --- publish AccountSucceedEvent ---
-		createdEvent := kafka.AccountCreatedEvent{
-			AccountID:          newAccount.AccountID,
-			ReferenceNo:        newAccount.ReferenceNo,
-			PartnerReferenceNo: newAccount.PartnerReferenceNo,
-			Name:               payload.Name,
-			Email:              payload.Email,
-			CustomerID:         payload.CustomerID,
-			PartnerID:          r.Header.Get("X-PARTNER-ID"),
-			ExternalID:         r.Header.Get("X-EXTERNAL-ID"),
-			BankCode:           payload.BankCode,
-			AuthCode:           newAccount.AuthCode,
-			State:              newAccount.State,
-			CreatedAt:          time.Now(),
-		}
-		if pubErr := h.producer.Publish(ctx, kafka.TopicAccountCreated, newAccount.ReferenceNo, createdEvent); pubErr != nil {
-			h.logger.Error("failed to publish account.created event", zap.Error(pubErr))
-		}
-
 		h.logger.Info("Berhasil membuat data akun baru",
 			zap.String("source", "database"),
 			zap.String("handler.result.id", newAccount.AccountID),
@@ -678,7 +649,9 @@ func (h *AccountsHandler) Create() http.HandlerFunc {
 			w,
 			models.SnapSuccess.HttpCode,
 			models.SnapSuccess.GetResponseCode(svcCode),
-			models.SnapSuccess.ResponseMessage, responseBody,
+			// models.SnapSuccess.ResponseMessage,
+			"Berhasil membuat data akun",
+			responseBody,
 		)
 	}
 }

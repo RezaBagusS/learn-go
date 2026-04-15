@@ -60,6 +60,7 @@ func (r *accountRepository) GetAllAccounts(ctx context.Context) ([]models.Accoun
 			bank_code,
 			account_number,
 			account_holder,
+			customer_id
 			reference_no,
 			partner_reference_no,
 			balance,
@@ -125,6 +126,7 @@ func (r *accountRepository) GetAccountById(ctx context.Context, id string) (*mod
 			bank_code,
 			account_number,
 			account_holder,
+			customer_id,
 			reference_no,
 			partner_reference_no,
 			balance,
@@ -294,6 +296,7 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 			bank_code,
 			account_number,
 			account_holder,
+			customer_id,
 			reference_no,
 			partner_reference_no,
 			balance,
@@ -314,7 +317,7 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 			$1, $2, $3, $4, $5,
 			$6, $7, $8, $9, $10,
 			$11, $12, $13, $14, $15,
-			$16, $17, $18, $19 
+			$16, $17, $18, $19, $20
 		) RETURNING id`
 
 	span.SetAttributes(
@@ -336,22 +339,23 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account models.Ac
 		account.BankCode,           // $1
 		account.AccountNumber,      // $2
 		account.AccountHolder,      // $3
-		account.ReferenceNo,        // $4
-		account.PartnerReferenceNo, // $5
-		account.Balance,            // $6
-		account.Currency,           // $7
-		account.Email,              // $8
-		account.PhoneNo,            // $9
-		account.CountryCode,        // $10
-		account.Lang,               // $11
-		account.Locale,             // $12
-		account.MerchantID,         // $13
-		account.SubMerchantID,      // $14
-		account.OnboardingPartner,  // $15
-		account.TerminalType,       // $16
-		account.Scopes,             // $17
-		account.RedirectURL,        // $18
-		account.AdditionalInfo,     // $19
+		account.CustomerID,         // $4
+		account.ReferenceNo,        // $5
+		account.PartnerReferenceNo, // $6
+		100000,                     // $7
+		account.Currency,           // $8
+		account.Email,              // $9
+		account.PhoneNo,            // $10
+		account.CountryCode,        // $11
+		account.Lang,               // $12
+		account.Locale,             // $13
+		account.MerchantID,         // $14
+		account.SubMerchantID,      // $15
+		account.OnboardingPartner,  // $16
+		account.TerminalType,       // $17
+		account.Scopes,             // $18
+		account.RedirectURL,        // $19
+		account.AdditionalInfo,     // $20
 	).Scan(&newId)
 
 	metrics.DBQueryDuration.WithLabelValues(repoAccount, operation).

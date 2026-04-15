@@ -54,6 +54,7 @@ type TransferIntrabankRequest struct {
 	CustomerReference    string           `json:"customer_reference"`
 	FeeType              string           `json:"fee_type"`
 	Remark               string           `json:"remark"`
+	ExternalID           string           `json:"external_id"`
 	SourceAccountNo      string           `json:"source_account_no"`
 	TransactionDate      string           `json:"transaction_date"`
 	OriginatorInfos      []OriginatorInfo `json:"originator_infos"`

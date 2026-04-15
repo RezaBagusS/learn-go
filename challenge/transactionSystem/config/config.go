@@ -14,7 +14,7 @@ const (
 	DOMAIN_BANK        = "bank"
 	DOMAIN_ACCOUNT     = "account"
 	DOMAIN_TRANSACTION = "transaction"
-	DOMAIN_OAUTH       = "oaut"
+	DOMAIN_OAUTH       = "oauth"
 )
 
 const (

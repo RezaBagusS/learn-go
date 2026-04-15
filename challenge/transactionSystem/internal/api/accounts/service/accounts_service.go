@@ -4,6 +4,7 @@ import (
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/accounts/repository"
 	"belajar-go/challenge/transactionSystem/internal/api/banks/service"
+	"belajar-go/challenge/transactionSystem/internal/kafka"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
@@ -21,7 +22,7 @@ type AccountsService interface {
 	FetchAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail)
 	FetchAccountById(ctx context.Context, id string) (*models.Account, *models.SnapDetail)
 	FetchTransactionsByAccountId(ctx context.Context, id string, trxType string) ([]models.Transaction, *models.SnapDetail)
-	CreateNewAccount(ctx context.Context, account models.AccountCreateRequest) (*models.AccountCreateResponse, *models.SnapDetail)
+	CreateNewAccount(ctx context.Context, account models.AccountCreateRequest, producer *kafka.Producer, svcCode string) (*models.AccountCreateResponse, *models.SnapDetail)
 	PatchAccountById(ctx context.Context, account models.Account) (string, *models.SnapDetail)
 	DeleteAccountById(ctx context.Context, id string) *models.SnapDetail
 }
@@ -43,6 +44,7 @@ func NewAccountsService(repo repository.AccountRepository, bankSvc service.BankS
 }
 
 const svcAccount = "account"
+const DEFAULT_CURRENCY = "IDR"
 
 // Fetch All Data
 func (s *accountsService) FetchAllAccounts(ctx context.Context) ([]models.Account, *models.SnapDetail) {
@@ -171,7 +173,7 @@ func (s *accountsService) FetchTransactionsByAccountId(ctx context.Context, id s
 }
 
 // Create new account
-func (s *accountsService) CreateNewAccount(ctx context.Context, account models.AccountCreateRequest) (*models.AccountCreateResponse, *models.SnapDetail) {
+func (s *accountsService) CreateNewAccount(ctx context.Context, account models.AccountCreateRequest, producer *kafka.Producer, svcCode string) (*models.AccountCreateResponse, *models.SnapDetail) {
 
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "AccountService.Create")
@@ -191,6 +193,24 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		span.RecordError(prefix)
 		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "error").Inc()
+
+		// --- publish AccountFailedEvent ---
+		failedEvent := kafka.AccountFailedEvent{
+			PartnerReferenceNo: account.PartnerReferenceNo,
+			CustomerID:         account.CustomerID,
+			MerchantID:         account.MerchantID,
+			PartnerID:          account.PartnerID,
+			ExternalID:         account.ExternalID,
+			ErrorCode:          snapErr.GetResponseCode(svcCode),
+			HttpCode:           snapErr.HttpCode,
+			ErrorMessage:       snapErr.ResponseMessage,
+			FailedAt:           time.Now(),
+		}
+
+		if pubErr := producer.Publish(ctx, kafka.TopicAccountFailed, account.PartnerReferenceNo, failedEvent); pubErr != nil {
+			s.logger.Error("failed to publish account.failed event", zap.Error(pubErr))
+		}
+
 		return nil, snapErr
 	}
 	metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operation, "success").Inc()
@@ -209,8 +229,10 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 
 	NewAccount := models.Account{
 		BankCode:           account.BankCode,
-		AccountNumber:      account.CustomerID,
+		AccountNumber:      helper.GenerateAccountNumber(),
+		CustomerID:         account.CustomerID,
 		AccountHolder:      account.Name,
+		Currency:           DEFAULT_CURRENCY,
 		ReferenceNo:        referenceNo,
 		PartnerReferenceNo: account.PartnerReferenceNo,
 		Email:              account.Email,
@@ -240,6 +262,24 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		span.RecordError(prefix)
 		s.logger.Error(snapErr.ResponseMessage, zap.Error(prefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcAccount, operationCreate, "error").Inc()
+
+		// --- publish AccountFailedEvent ---
+		failedEvent := kafka.AccountFailedEvent{
+			PartnerReferenceNo: account.PartnerReferenceNo,
+			CustomerID:         account.CustomerID,
+			MerchantID:         account.MerchantID,
+			PartnerID:          account.PartnerID,
+			ExternalID:         account.ExternalID,
+			ErrorCode:          snapErr.GetResponseCode(svcCode),
+			HttpCode:           snapErr.HttpCode,
+			ErrorMessage:       snapErr.ResponseMessage,
+			FailedAt:           time.Now(),
+		}
+
+		if pubErr := producer.Publish(ctx, kafka.TopicAccountFailed, account.PartnerReferenceNo, failedEvent); pubErr != nil {
+			s.logger.Error("failed to publish account.failed event", zap.Error(pubErr))
+		}
+
 		return nil, snapErr
 	}
 
@@ -253,12 +293,36 @@ func (s *accountsService) CreateNewAccount(ctx context.Context, account models.A
 		zap.String("service.result.id", returnedId),
 	)
 
+	// --- publish AccountSucceedEvent ---
+
+	authCode := helper.GenerateAuthCode()
+	apiKey := helper.GenerateAPIKey()
+	accountId := NewAccount.ID.String()
+
+	createdEvent := kafka.AccountCreatedEvent{
+		AccountID:          accountId,
+		ReferenceNo:        NewAccount.ReferenceNo,
+		PartnerReferenceNo: NewAccount.PartnerReferenceNo,
+		Name:               account.Name,
+		Email:              account.Email,
+		CustomerID:         account.CustomerID,
+		PartnerID:          account.PartnerID,
+		ExternalID:         account.ExternalID,
+		BankCode:           account.BankCode,
+		AuthCode:           authCode,
+		State:              account.State,
+		CreatedAt:          time.Now(),
+	}
+	if pubErr := producer.Publish(ctx, kafka.TopicAccountCreated, NewAccount.ReferenceNo, createdEvent); pubErr != nil {
+		s.logger.Error("failed to publish account.created event", zap.Error(pubErr))
+	}
+
 	accountResponse := models.AccountCreateResponse{
 		ReferenceNo:        NewAccount.ReferenceNo,
 		PartnerReferenceNo: NewAccount.PartnerReferenceNo,
-		AuthCode:           helper.GenerateAuthCode(),
-		APIKey:             helper.GenerateAPIKey(),
-		AccountID:          NewAccount.ID.String(),
+		AuthCode:           authCode,
+		APIKey:             apiKey,
+		AccountID:          accountId,
 		State:              account.State,
 		AdditionalInfo:     account.AdditionalInfo,
 	}

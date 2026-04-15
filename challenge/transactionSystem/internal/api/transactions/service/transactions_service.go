@@ -3,6 +3,7 @@ package service
 import (
 	"belajar-go/challenge/transactionSystem/helper"
 	"belajar-go/challenge/transactionSystem/internal/api/transactions/repository"
+	"belajar-go/challenge/transactionSystem/internal/kafka"
 	"belajar-go/challenge/transactionSystem/internal/middleware"
 	"belajar-go/challenge/transactionSystem/internal/models"
 	"belajar-go/challenge/transactionSystem/observability/metrics"
@@ -23,7 +24,7 @@ type TransactionService interface {
 	FetchTransactionById(ctx context.Context, id string) (*models.Transaction, *models.SnapDetail)
 	// CreateTrx(ctx context.Context, trx models.Transaction) (string, error)
 	FetchSummaryToday(ctx context.Context, date time.Time) ([]models.Transaction, *models.SnapDetail)
-	TransferIntrabank(ctx context.Context, accountID string, header models.SNAPHeader, payload models.TransferIntrabankRequest) (string, *models.SnapDetail)
+	TransferIntrabank(ctx context.Context, accountID string, producer *kafka.Producer, payload models.TransferIntrabankRequest, svcCode string) (string, *models.SnapDetail)
 }
 
 type transactionService struct {
@@ -233,7 +234,7 @@ func (s *transactionService) FetchTransactionById(ctx context.Context, id string
 // 	return transactionID, nil
 // }
 
-func (s *transactionService) TransferIntrabank(ctx context.Context, accountID string, header models.SNAPHeader, payload models.TransferIntrabankRequest) (string, *models.SnapDetail) {
+func (s *transactionService) TransferIntrabank(ctx context.Context, accountID string, producer *kafka.Producer, payload models.TransferIntrabankRequest, svcCode string) (string, *models.SnapDetail) {
 	tracer := middleware.TracerFromCtx(ctx)
 	ctx, span := tracer.Start(ctx, "TransactionService.TransferIntrabank")
 	defer span.End()
@@ -284,7 +285,7 @@ func (s *transactionService) TransferIntrabank(ctx context.Context, accountID st
 		Amount:         amountValue,
 		Currency:       payload.Amount.Currency,
 		PartnerRefNo:   payload.PartnerReferenceNo,
-		ExternalID:     header.ExternalID,
+		ExternalID:     payload.ExternalID,
 		Status:         "SUCCESS",
 		Note:           payload.Remark, // fix: Remark bukan CustomerReference
 		AdditionalInfo: additionalInfoBytes,
@@ -304,7 +305,64 @@ func (s *transactionService) TransferIntrabank(ctx context.Context, accountID st
 		span.RecordError(errPrefix)
 		s.logger.Error("database transaction failed", zap.Error(errPrefix))
 		metrics.ServiceRequestsTotal.WithLabelValues(svcTransaction, operation, "error").Inc()
+
+		// --- publish TransactionFailedEvent ---
+		amountFloat, _ := strconv.ParseFloat(payload.Amount.Value, 64)
+
+		failedEvent := kafka.TransactionFailedEvent{
+			TransactionID:   payload.PartnerReferenceNo,
+			SenderAccount:   payload.SourceAccountNo,
+			ReceiverAccount: payload.BeneficiaryAccountNo,
+			Amount:          amountFloat,
+			Reason:          snapErr.ResponseMessage,
+			ErrorCode:       snapErr.GetResponseCode(svcCode),
+			HttpCode:        snapErr.HttpCode,
+			ErrorMessage:    snapErr.ResponseMessage,
+			FailedAt:        time.Now(),
+		}
+
+		if pubErr := producer.Publish(ctx, kafka.TopicTransactionFailed, payload.PartnerReferenceNo, failedEvent); pubErr != nil {
+			s.logger.Error("failed to publish transaction.failed event", zap.Error(pubErr))
+		}
+
 		return "", snapErr
+	}
+
+	// --- publish TransactionSucceedEvent ---
+	amountFloat, _ := strconv.ParseFloat(payload.Amount.Value, 64)
+	createdEvent := kafka.TransactionCreatedEvent{
+		TransactionID:   referenceNo,
+		SenderAccount:   payload.SourceAccountNo,
+		ReceiverAccount: payload.BeneficiaryAccountNo,
+		Amount:          amountFloat,
+		Currency:        payload.Amount.Currency,
+		CreatedAt:       time.Now(),
+	}
+	if pubErr := producer.Publish(ctx, kafka.TopicTransactionCreated, referenceNo, createdEvent); pubErr != nil {
+		s.logger.Error("failed to publish transaction.created event", zap.Error(pubErr))
+	}
+
+	// --- publish BalanceUpdatedEvent ---
+	// For Sender
+	senderEvent := kafka.AccountBalanceUpdatedEvent{
+		AccountNo: payload.SourceAccountNo,
+		Amount:    amountFloat,
+		Type:      "out",
+		UpdatedAt: time.Now(),
+	}
+	if pubErr := producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.SourceAccountNo, senderEvent); pubErr != nil {
+		s.logger.Error("failed to publish account.balance.updated event (sender)", zap.Error(pubErr))
+	}
+
+	// For Receiver
+	receiverEvent := kafka.AccountBalanceUpdatedEvent{
+		AccountNo: payload.BeneficiaryAccountNo,
+		Amount:    amountFloat,
+		Type:      "in",
+		UpdatedAt: time.Now(),
+	}
+	if pubErr := producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.BeneficiaryAccountNo, receiverEvent); pubErr != nil {
+		s.logger.Error("failed to publish account.balance.updated event (receiver)", zap.Error(pubErr))
 	}
 
 	span.SetStatus(codes.Ok, "transfer berhasil")

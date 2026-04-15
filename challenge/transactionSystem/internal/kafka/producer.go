@@ -35,15 +35,14 @@ func (p *Producer) getWriter(topic string) *kafka.Writer {
 		Balancer:     &kafka.LeastBytes{},
 		RequiredAcks: kafka.RequireOne,
 		WriteTimeout: 10 * time.Second,
-		// Async: false → tunggu ack sebelum return, lebih aman untuk financial transaction
-		Async: false,
+		Async:        false,
 	}
 
 	p.writers[topic] = w
 	return w
 }
 
-// Publish mengirim event ke topic tertentu dengan key sebagai routing key
+// Publish
 func (p *Producer) Publish(ctx context.Context, topic, key string, payload any) error {
 	value, err := json.Marshal(payload)
 	if err != nil {
@@ -72,7 +71,7 @@ func (p *Producer) Publish(ctx context.Context, topic, key string, payload any) 
 	return nil
 }
 
-// Close menutup semua writer secara graceful
+// Close
 func (p *Producer) Close() {
 	for topic, w := range p.writers {
 		if err := w.Close(); err != nil {

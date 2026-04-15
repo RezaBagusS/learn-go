@@ -47,7 +47,7 @@ func (h *AccountKafkaHandler) HandleAccountFailed(ctx context.Context, event kaf
 		zap.String("error_code", event.ErrorCode),
 		zap.String("error_message", event.ErrorMessage),
 		zap.Int("http_code", event.HttpCode),
-		zap.Time("timestamp", event.Timestamp),
+		zap.Time("failedAt", event.FailedAt),
 	)
 
 	return nil
