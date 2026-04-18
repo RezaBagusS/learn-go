@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: account.proto
+// source: pb/account/account.proto
 
 package account
 
@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AccountGRPCService_ExecuteTransferMutation_FullMethodName = "/account.AccountGRPCService/ExecuteTransferMutation"
+	AccountGRPCService_ExecuteTopupMutation_FullMethodName    = "/account.AccountGRPCService/ExecuteTopupMutation"
 )
 
 // AccountGRPCServiceClient is the client API for AccountGRPCService service.
@@ -28,6 +29,8 @@ const (
 type AccountGRPCServiceClient interface {
 	// RPC baru untuk mengeksekusi mutasi transfer sekaligus validasi
 	ExecuteTransferMutation(ctx context.Context, in *TransferMutationRequest, opts ...grpc.CallOption) (*TransferMutationResponse, error)
+	// RPC baru untuk penambahan saldo
+	ExecuteTopupMutation(ctx context.Context, in *TopupMutationRequest, opts ...grpc.CallOption) (*TopupMutationResponse, error)
 }
 
 type accountGRPCServiceClient struct {
@@ -48,12 +51,24 @@ func (c *accountGRPCServiceClient) ExecuteTransferMutation(ctx context.Context, 
 	return out, nil
 }
 
+func (c *accountGRPCServiceClient) ExecuteTopupMutation(ctx context.Context, in *TopupMutationRequest, opts ...grpc.CallOption) (*TopupMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TopupMutationResponse)
+	err := c.cc.Invoke(ctx, AccountGRPCService_ExecuteTopupMutation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AccountGRPCServiceServer is the server API for AccountGRPCService service.
 // All implementations must embed UnimplementedAccountGRPCServiceServer
 // for forward compatibility.
 type AccountGRPCServiceServer interface {
 	// RPC baru untuk mengeksekusi mutasi transfer sekaligus validasi
 	ExecuteTransferMutation(context.Context, *TransferMutationRequest) (*TransferMutationResponse, error)
+	// RPC baru untuk penambahan saldo
+	ExecuteTopupMutation(context.Context, *TopupMutationRequest) (*TopupMutationResponse, error)
 	mustEmbedUnimplementedAccountGRPCServiceServer()
 }
 
@@ -66,6 +81,9 @@ type UnimplementedAccountGRPCServiceServer struct{}
 
 func (UnimplementedAccountGRPCServiceServer) ExecuteTransferMutation(context.Context, *TransferMutationRequest) (*TransferMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExecuteTransferMutation not implemented")
+}
+func (UnimplementedAccountGRPCServiceServer) ExecuteTopupMutation(context.Context, *TopupMutationRequest) (*TopupMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteTopupMutation not implemented")
 }
 func (UnimplementedAccountGRPCServiceServer) mustEmbedUnimplementedAccountGRPCServiceServer() {}
 func (UnimplementedAccountGRPCServiceServer) testEmbeddedByValue()                            {}
@@ -106,6 +124,24 @@ func _AccountGRPCService_ExecuteTransferMutation_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AccountGRPCService_ExecuteTopupMutation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TopupMutationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccountGRPCServiceServer).ExecuteTopupMutation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AccountGRPCService_ExecuteTopupMutation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccountGRPCServiceServer).ExecuteTopupMutation(ctx, req.(*TopupMutationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AccountGRPCService_ServiceDesc is the grpc.ServiceDesc for AccountGRPCService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -117,7 +153,11 @@ var AccountGRPCService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ExecuteTransferMutation",
 			Handler:    _AccountGRPCService_ExecuteTransferMutation_Handler,
 		},
+		{
+			MethodName: "ExecuteTopupMutation",
+			Handler:    _AccountGRPCService_ExecuteTopupMutation_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "account.proto",
+	Metadata: "pb/account/account.proto",
 }

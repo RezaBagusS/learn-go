@@ -26,6 +26,7 @@ type AccountRepository interface {
 	UpdateAccount(ctx context.Context, account domain.Account) (string, *domain.SnapDetail)
 	DeleteAccount(ctx context.Context, id string) *domain.SnapDetail
 	ProcessTransferMutation(ctx context.Context, sourceAcc, beneficiaryAcc string, amount int64) error
+	ProcessTopupMutation(ctx context.Context, accountNo string, amount int64) error
 }
 
 type accountRepository struct {
@@ -245,7 +246,7 @@ func (r *accountRepository) CreateAccount(ctx context.Context, account domain.Ac
 		account.CustomerID,         // $4
 		account.ReferenceNo,        // $5
 		account.PartnerReferenceNo, // $6
-		100000,                     // $7 initial balance
+		0,                          // $7 initial balance (sekarang diset 0)
 		account.Currency,           // $8
 		account.Email,              // $9
 		account.PhoneNo,            // $10
@@ -497,6 +498,50 @@ func (r *accountRepository) ProcessTransferMutation(ctx context.Context, sourceA
 	if err := tx.Commit(); err != nil {
 		r.logger.Error("Commit proses transfer mutasi akun", zap.Error(err))
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// ProcessTopupMutation
+func (r *accountRepository) ProcessTopupMutation(ctx context.Context, accountNo string, amount int64) error {
+	tracer := middleware.TracerFromCtx(ctx)
+	ctx, span := tracer.Start(ctx, "AccountRepo.TopupMutation")
+	defer span.End()
+	// operation := "topup"
+
+	span.SetAttributes(
+		attribute.String("db.system", "postgresql"),
+		attribute.String("account.number", accountNo),
+		attribute.Int64("amount", amount),
+	)
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		span.RecordError(err)
+		r.logger.Error(domain.ErrDatabaseTrx.Error(), zap.Error(err))
+		return errors.New(domain.SnapInternalError.ResponseMessage)
+	}
+	defer tx.Rollback()
+
+	// Account validation & Locking
+	var dummy string
+	err = tx.QueryRowContext(ctx, "SELECT id FROM accounts WHERE account_number = $1 FOR UPDATE", accountNo).Scan(&dummy)
+	if err != nil {
+		r.logger.Warn("Account topup tidak ditemukan", zap.String("account", accountNo))
+		return errors.New(domain.SnapInvalidAccount.ResponseMessage)
+	}
+
+	// Mutasi Saldo
+	_, err = tx.ExecContext(ctx, "UPDATE accounts SET balance = balance + $1, updated_at = NOW() WHERE account_number = $2", amount, accountNo)
+	if err != nil {
+		r.logger.Error("Gagal mutasi saldo topup", zap.Error(err))
+		return domain.ErrDatabaseFailed
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.logger.Error("Commit topup mutasi failed", zap.Error(err))
+		return err
 	}
 
 	return nil

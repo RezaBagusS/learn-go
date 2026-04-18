@@ -2,17 +2,16 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.1
-// source: account.proto
+// source: pb/account/account.proto
 
 package account
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -33,7 +32,7 @@ type TransferMutationRequest struct {
 
 func (x *TransferMutationRequest) Reset() {
 	*x = TransferMutationRequest{}
-	mi := &file_account_proto_msgTypes[0]
+	mi := &file_pb_account_account_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +44,7 @@ func (x *TransferMutationRequest) String() string {
 func (*TransferMutationRequest) ProtoMessage() {}
 
 func (x *TransferMutationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_account_proto_msgTypes[0]
+	mi := &file_pb_account_account_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +57,7 @@ func (x *TransferMutationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferMutationRequest.ProtoReflect.Descriptor instead.
 func (*TransferMutationRequest) Descriptor() ([]byte, []int) {
-	return file_account_proto_rawDescGZIP(), []int{0}
+	return file_pb_account_account_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *TransferMutationRequest) GetSourceAccount() string {
@@ -93,7 +92,7 @@ type TransferMutationResponse struct {
 
 func (x *TransferMutationResponse) Reset() {
 	*x = TransferMutationResponse{}
-	mi := &file_account_proto_msgTypes[1]
+	mi := &file_pb_account_account_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -105,7 +104,7 @@ func (x *TransferMutationResponse) String() string {
 func (*TransferMutationResponse) ProtoMessage() {}
 
 func (x *TransferMutationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_account_proto_msgTypes[1]
+	mi := &file_pb_account_account_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -118,7 +117,7 @@ func (x *TransferMutationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferMutationResponse.ProtoReflect.Descriptor instead.
 func (*TransferMutationResponse) Descriptor() ([]byte, []int) {
-	return file_account_proto_rawDescGZIP(), []int{1}
+	return file_pb_account_account_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *TransferMutationResponse) GetSuccess() bool {
@@ -142,11 +141,123 @@ func (x *TransferMutationResponse) GetErrorMessage() string {
 	return ""
 }
 
-var File_account_proto protoreflect.FileDescriptor
+type TopupMutationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountNo     string                 `protobuf:"bytes,1,opt,name=account_no,json=accountNo,proto3" json:"account_no,omitempty"`
+	Amount        int64                  `protobuf:"varint,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_account_proto_rawDesc = "" +
+func (x *TopupMutationRequest) Reset() {
+	*x = TopupMutationRequest{}
+	mi := &file_pb_account_account_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopupMutationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopupMutationRequest) ProtoMessage() {}
+
+func (x *TopupMutationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_account_account_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopupMutationRequest.ProtoReflect.Descriptor instead.
+func (*TopupMutationRequest) Descriptor() ([]byte, []int) {
+	return file_pb_account_account_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *TopupMutationRequest) GetAccountNo() string {
+	if x != nil {
+		return x.AccountNo
+	}
+	return ""
+}
+
+func (x *TopupMutationRequest) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+type TopupMutationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ErrorCode     string                 `protobuf:"bytes,2,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopupMutationResponse) Reset() {
+	*x = TopupMutationResponse{}
+	mi := &file_pb_account_account_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopupMutationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopupMutationResponse) ProtoMessage() {}
+
+func (x *TopupMutationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_account_account_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopupMutationResponse.ProtoReflect.Descriptor instead.
+func (*TopupMutationResponse) Descriptor() ([]byte, []int) {
+	return file_pb_account_account_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *TopupMutationResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *TopupMutationResponse) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *TopupMutationResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+var File_pb_account_account_proto protoreflect.FileDescriptor
+
+const file_pb_account_account_proto_rawDesc = "" +
 	"\n" +
-	"\raccount.proto\x12\aaccount\"\x89\x01\n" +
+	"\x18pb/account/account.proto\x12\aaccount\"\x89\x01\n" +
 	"\x17TransferMutationRequest\x12%\n" +
 	"\x0esource_account\x18\x01 \x01(\tR\rsourceAccount\x12/\n" +
 	"\x13beneficiary_account\x18\x02 \x01(\tR\x12beneficiaryAccount\x12\x16\n" +
@@ -155,57 +266,71 @@ const file_account_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2t\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"M\n" +
+	"\x14TopupMutationRequest\x12\x1d\n" +
+	"\n" +
+	"account_no\x18\x01 \x01(\tR\taccountNo\x12\x16\n" +
+	"\x06amount\x18\x02 \x01(\x03R\x06amount\"u\n" +
+	"\x15TopupMutationResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xcb\x01\n" +
 	"\x12AccountGRPCService\x12^\n" +
-	"\x17ExecuteTransferMutation\x12 .account.TransferMutationRequest\x1a!.account.TransferMutationResponseB$Z\"my-microservices/shared/pb/accountb\x06proto3"
+	"\x17ExecuteTransferMutation\x12 .account.TransferMutationRequest\x1a!.account.TransferMutationResponse\x12U\n" +
+	"\x14ExecuteTopupMutation\x12\x1d.account.TopupMutationRequest\x1a\x1e.account.TopupMutationResponseB$Z\"my-microservices/shared/pb/accountb\x06proto3"
 
 var (
-	file_account_proto_rawDescOnce sync.Once
-	file_account_proto_rawDescData []byte
+	file_pb_account_account_proto_rawDescOnce sync.Once
+	file_pb_account_account_proto_rawDescData []byte
 )
 
-func file_account_proto_rawDescGZIP() []byte {
-	file_account_proto_rawDescOnce.Do(func() {
-		file_account_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_account_proto_rawDesc), len(file_account_proto_rawDesc)))
+func file_pb_account_account_proto_rawDescGZIP() []byte {
+	file_pb_account_account_proto_rawDescOnce.Do(func() {
+		file_pb_account_account_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pb_account_account_proto_rawDesc), len(file_pb_account_account_proto_rawDesc)))
 	})
-	return file_account_proto_rawDescData
+	return file_pb_account_account_proto_rawDescData
 }
 
-var file_account_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_account_proto_goTypes = []any{
+var file_pb_account_account_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_pb_account_account_proto_goTypes = []any{
 	(*TransferMutationRequest)(nil),  // 0: account.TransferMutationRequest
 	(*TransferMutationResponse)(nil), // 1: account.TransferMutationResponse
+	(*TopupMutationRequest)(nil),     // 2: account.TopupMutationRequest
+	(*TopupMutationResponse)(nil),    // 3: account.TopupMutationResponse
 }
-var file_account_proto_depIdxs = []int32{
+var file_pb_account_account_proto_depIdxs = []int32{
 	0, // 0: account.AccountGRPCService.ExecuteTransferMutation:input_type -> account.TransferMutationRequest
-	1, // 1: account.AccountGRPCService.ExecuteTransferMutation:output_type -> account.TransferMutationResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
+	2, // 1: account.AccountGRPCService.ExecuteTopupMutation:input_type -> account.TopupMutationRequest
+	1, // 2: account.AccountGRPCService.ExecuteTransferMutation:output_type -> account.TransferMutationResponse
+	3, // 3: account.AccountGRPCService.ExecuteTopupMutation:output_type -> account.TopupMutationResponse
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_account_proto_init() }
-func file_account_proto_init() {
-	if File_account_proto != nil {
+func init() { file_pb_account_account_proto_init() }
+func file_pb_account_account_proto_init() {
+	if File_pb_account_account_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_account_proto_rawDesc), len(file_account_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_account_account_proto_rawDesc), len(file_pb_account_account_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_account_proto_goTypes,
-		DependencyIndexes: file_account_proto_depIdxs,
-		MessageInfos:      file_account_proto_msgTypes,
+		GoTypes:           file_pb_account_account_proto_goTypes,
+		DependencyIndexes: file_pb_account_account_proto_depIdxs,
+		MessageInfos:      file_pb_account_account_proto_msgTypes,
 	}.Build()
-	File_account_proto = out.File
-	file_account_proto_goTypes = nil
-	file_account_proto_depIdxs = nil
+	File_pb_account_account_proto = out.File
+	file_pb_account_account_proto_goTypes = nil
+	file_pb_account_account_proto_depIdxs = nil
 }

@@ -39,14 +39,7 @@ async function validateTransaction(call, callback) {
   let action = 'ALLOW';
 
   try {
-    // Check Nominal Limit
-    if (req.amount > MAX_AMOUNT_LIMIT) {
-      isFraud = true;
-      reason = `Amount exceeds limit: ${MAX_AMOUNT_LIMIT}`;
-      action = 'BLOCK';
-    }
-
-    // Check Blacklist 
+    // --- 1. Check Blacklist ---
     const isSharedBlacklist = await redis.sismember('fraud:blacklist', req.receiver_id);
     if (BLACKLISTED_ACCOUNTS.includes(req.receiver_id) || isSharedBlacklist) {
       isFraud = true;
@@ -54,23 +47,46 @@ async function validateTransaction(call, callback) {
       action = 'BLOCK';
     }
 
-    // Logic Check Jam (01:00 - 04:00) -> Review Only
-    const hour = new Date().getHours();
-    if (hour >= 1 && hour <= 4 && !isFraud) {
-      // isFraud = true; 
-      reason = 'Suspicious hour (1AM - 4AM)';
-      action = 'REVIEW';
+    // --- 2. Check Daily Cumulative Limit (50jt/Day) ---
+    if (!isFraud) {
+      const today = new Date().toISOString().split('T')[0];
+      const dailyLimitKey = `fraud:daily_limit:${req.sender_id}:${today}`;
+
+      const amount = parseInt(req.amount);
+      const currentDailyTotal = await redis.incrby(dailyLimitKey, amount);
+
+      // Set expiry 24 jam jika key baru
+      if (currentDailyTotal === amount) {
+        await redis.expire(dailyLimitKey, 86400);
+      }
+
+      if (currentDailyTotal > MAX_AMOUNT_LIMIT) {
+        isFraud = true;
+        reason = `Daily limit exceeded: ${currentDailyTotal} / ${MAX_AMOUNT_LIMIT}`;
+        action = 'BLOCK';
+        // Rollback nominal karena transaksi ini gagal/dihambat
+        await redis.incrby(dailyLimitKey, -amount);
+      }
     }
 
-    // Velocity Check (Redis)
-    const velocityKey = `fraud:velocity:${req.sender_id}`;
-    const count = await redis.incr(velocityKey);
-    if (count === 1) await redis.expire(velocityKey, 60); // 1 menit
+    // --- 3. Velocity Check (Max 5 tx / minute) ---
+    if (!isFraud) {
+      const velocityKey = `fraud:velocity:${req.sender_id}`;
+      const count = await redis.incr(velocityKey);
+      if (count === 1) await redis.expire(velocityKey, 300);
 
-    if (count > 5 && action === 'ALLOW') {
-      isFraud = true;
-      reason = 'Velocity limit exceeded (max 5 tx/min)';
-      action = 'BLOCK';
+      if (count > 5) {
+        isFraud = true;
+        reason = 'Velocity limit exceeded (max 5 tx/min)';
+        action = 'BLOCK';
+      }
+    }
+
+    // --- 4. Logic Check Jam (01:00 - 04:00) -> Review Only ---
+    const hour = new Date().getHours();
+    if (hour >= 1 && hour <= 4 && !isFraud) {
+      reason = 'Suspicious hour (1AM - 4AM)';
+      action = 'REVIEW';
     }
 
   } catch (err) {

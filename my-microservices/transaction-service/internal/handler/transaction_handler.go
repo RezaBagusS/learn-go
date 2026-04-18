@@ -88,6 +88,12 @@ func (a *TransactionsHandler) MapRoutes(obs *middleware.ObservabilityMiddleware)
 			obs.Wrap("TransactionHandler.TransferIntraBank", config.DOMAIN_TRANSACTION, a.idempotency.Check(a.TransferIntraBank())),
 		).ServeHTTP,
 	)
+	a.mux.HandleFunc(
+		helper.NewAPIPath(http.MethodPost, version, "/topup"),
+		middleware.ValidateSNAPToken(
+			obs.Wrap("TransactionHandler.Topup", config.DOMAIN_TRANSACTION, a.idempotency.Check(a.Topup())),
+		).ServeHTTP,
+	)
 }
 
 // GET /v1.0/transactions
@@ -457,5 +463,71 @@ func (h *TransactionsHandler) TransferIntraBank() http.HandlerFunc {
 		dto.WriteResponse(w, domain.SnapSuccess.HttpCode, domain.SnapSuccess.GetResponseCode(svcCode),
 			"Transfer berhasil dilakukan",
 			responseBody)
+	}
+}
+
+// POST /v1.0/topup
+func (h *TransactionsHandler) Topup() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		span, tracer := middleware.AllCtx(ctx)
+		accountId := r.Header.Get("X-ACCOUNT-ID")
+		svcCode := config.SVC_CODE_TRANSFER_INTRABANK // Reuse or add new
+
+		snapHeader := domain.ExtractSNAPHeader(r)
+		span.SetAttributes(
+			attribute.String("snap.partner_id", snapHeader.PartnerID),
+			attribute.String("snap.external_id", snapHeader.ExternalID),
+			attribute.String("auth.sub", accountId),
+		)
+
+		var payload domain.TopupRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			h.logger.Error(domain.ErrInvalidJsonFormat.Error(), zap.Error(err))
+			span.RecordError(err)
+			dto.WriteError(w, domain.SnapInvalidFormat.HttpCode, domain.SnapInvalidFormat.GetResponseCode(svcCode), err.Error())
+			return
+		}
+
+		// Validation
+		if payload.PartnerReferenceNo == "" || payload.Amount.Value == "" || payload.SourceAccountNo == "" {
+			h.logger.Error("Field wajib tidak lengkap")
+			span.SetStatus(codes.Error, "field wajib tidak lengkap")
+			dto.WriteError(w, domain.SnapMandatoryField.HttpCode, domain.SnapMandatoryField.GetResponseCode(svcCode), "Field tidak lengkap")
+			return
+		}
+
+		payload.ExternalID = snapHeader.ExternalID
+
+		svcCtx, svcSpan := tracer.Start(ctx, "Service-Topup")
+		svcSpan.SetAttributes(
+			attribute.String("db.partner_reference_no", payload.PartnerReferenceNo),
+			attribute.String("db.source_account_no", payload.SourceAccountNo),
+		)
+
+		referenceNo, snapErr := h.svc.Topup(svcCtx, accountId, h.producer, payload, svcCode)
+		svcSpan.End()
+
+		if snapErr != nil {
+			errWrapper := errors.New(snapErr.ResponseMessage)
+			h.logger.Error(snapErr.ResponseMessage, zap.Error(errWrapper))
+			span.RecordError(errWrapper)
+			span.SetStatus(codes.Error, snapErr.ResponseMessage)
+			dto.WriteError(w, snapErr.HttpCode, snapErr.GetResponseCode(svcCode), snapErr.ResponseMessage)
+			return
+		}
+
+		span.SetStatus(codes.Ok, "topup berhasil")
+		span.SetAttributes(attribute.String("snap.reference_no", referenceNo))
+		h.logger.Info("Topup berhasil dilakukan", zap.String("reference_no", referenceNo))
+
+		dto.WriteResponse(w, domain.SnapSuccess.HttpCode, domain.SnapSuccess.GetResponseCode(svcCode),
+			"Topup berhasil dilakukan",
+			domain.TopupResponse{
+				ReferenceNo:        referenceNo,
+				PartnerReferenceNo: payload.PartnerReferenceNo,
+				Amount:             payload.Amount,
+				SourceAccountNo:    payload.SourceAccountNo,
+			})
 	}
 }

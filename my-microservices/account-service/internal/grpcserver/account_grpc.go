@@ -57,3 +57,29 @@ func (s *accountGRPCServer) ExecuteTransferMutation(ctx context.Context, req *pb
 		Success: true,
 	}, nil
 }
+
+func (s *accountGRPCServer) ExecuteTopupMutation(ctx context.Context, req *pb.TopupMutationRequest) (*pb.TopupMutationResponse, error) {
+	err := s.repo.ProcessTopupMutation(ctx, req.AccountNo, req.Amount)
+
+	if err != nil {
+		s.log.Error("Topup mutation failed", zap.Error(err))
+
+		if errors.Is(err, domain.ErrIdNotFound) {
+			return &pb.TopupMutationResponse{
+				Success:      false,
+				ErrorCode:    "ERR_INVALID_ACCOUNT",
+				ErrorMessage: "Akun tidak ditemukan",
+			}, nil
+		}
+
+		return &pb.TopupMutationResponse{
+			Success:      false,
+			ErrorCode:    "ERR_SYSTEM",
+			ErrorMessage: "Gagal memproses topup",
+		}, nil
+	}
+
+	return &pb.TopupMutationResponse{
+		Success: true,
+	}, nil
+}

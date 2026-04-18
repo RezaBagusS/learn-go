@@ -31,6 +31,7 @@ type TransactionService interface {
 	FetchSummaryToday(ctx context.Context, date time.Time) ([]domain.Transaction, *domain.SnapDetail)
 	FetchTransactionsByAccountNo(ctx context.Context, accountNo string) ([]domain.Transaction, *domain.SnapDetail)
 	TransferIntrabank(ctx context.Context, accountID string, producer *kafka.Producer, payload domain.TransferIntrabankRequest, svcCode string) (string, *domain.SnapDetail)
+	Topup(ctx context.Context, accountID string, producer *kafka.Producer, payload domain.TopupRequest, svcCode string) (string, *domain.SnapDetail)
 }
 
 type transactionService struct {
@@ -224,6 +225,13 @@ func (s *transactionService) TransferIntrabank(ctx context.Context, accountID st
 			zap.String("account", payload.SourceAccountNo),
 			zap.Float64("amount", amountValue))
 	} else {
+		// Log hasil validasi FDS (Berhasil terkoneksi)
+		s.logger.Info("FDS validation response received",
+			zap.String("trx_id", payload.PartnerReferenceNo),
+			zap.String("action", fraudResp.Action),
+			zap.String("reason", fraudResp.Reason),
+			zap.Bool("is_fraud", fraudResp.IsFraud))
+
 		if fraudResp.IsFraud {
 			s.logger.Warn("FRAUD DETECTED!",
 				zap.String("trx_id", payload.PartnerReferenceNo),
@@ -418,4 +426,82 @@ func (s *transactionService) TransferIntrabank(ctx context.Context, accountID st
 	metrics.ServiceRequestsTotal.WithLabelValues(svcTransaction, operation, "success").Inc()
 
 	return referenceNo, nil
+}
+
+func (s *transactionService) Topup(ctx context.Context, accountID string, producer *kafka.Producer, payload domain.TopupRequest, svcCode string) (string, *domain.SnapDetail) {
+	tracer := middleware.TracerFromCtx(ctx)
+	ctx, span := tracer.Start(ctx, "TransactionService.Topup")
+	defer span.End()
+	// operation := "topup"
+
+	amountValue, err := strconv.ParseFloat(payload.Amount.Value, 64)
+	if err != nil {
+		span.RecordError(err)
+		return "", &domain.SnapInvalidFormat
+	}
+
+	if amountValue <= 0 {
+		return "", &domain.SnapInvalidAmount
+	}
+
+	// ─── PANGGIL GRPC ACCOUNT SERVICE UNTUK TOPUP ──────────────────────
+	mutationStart := time.Now()
+	mutationResp, grpcErr := s.accountCli.ExecuteTopupMutation(ctx, &pbAccount.TopupMutationRequest{
+		AccountNo: payload.SourceAccountNo,
+		Amount:    int64(amountValue),
+	})
+	metrics.ServiceDuration.WithLabelValues("grpc_account", "execute_topup").Observe(time.Since(mutationStart).Seconds())
+
+	if grpcErr != nil {
+		s.logTopupFailed(ctx, payload, producer, grpcErr.Error(), svcCode)
+		return "", &domain.SnapInternalError
+	}
+
+	if !mutationResp.Success {
+		s.logTopupFailed(ctx, payload, producer, mutationResp.ErrorMessage, svcCode)
+		return "", &domain.SnapInternalError
+	}
+
+	// ─── SIMPAN TRANSAKSI KE DB ────────────────────────────────────────
+	referenceNoGenerated := fmt.Sprintf("TOP%d", time.Now().Unix())
+	trx := domain.Transaction{
+		ReferenceNo:    referenceNoGenerated,
+		FromAccountNo:  "SYSTEM_TOPUP", // Virtual sender
+		ToAccountNo:    payload.SourceAccountNo,
+		Amount:         amountValue,
+		Currency:       payload.Amount.Currency,
+		PartnerRefNo:   payload.PartnerReferenceNo,
+		ExternalID:     payload.ExternalID,
+		Status:         "SUCCESS",
+		Note:           "Topup Balance",
+		AdditionalInfo: []byte("{}"),
+		CreatedAt:      time.Now(),
+	}
+
+	referenceNo, snapErr := s.repo.TransferIntraBank(ctx, trx) // Reuse existing repo method
+	if snapErr != nil {
+		return "", snapErr
+	}
+
+	// publish AccountBalanceUpdatedEvent
+	producer.Publish(ctx, kafka.TopicAccountBalanceUpdated, payload.SourceAccountNo, kafka.AccountBalanceUpdatedEvent{
+		AccountNo: payload.SourceAccountNo,
+		Amount:    amountValue,
+		Type:      "in",
+		UpdatedAt: time.Now(),
+	})
+
+	return referenceNo, nil
+}
+
+func (s *transactionService) logTopupFailed(ctx context.Context, payload domain.TopupRequest, producer *kafka.Producer, reason string, svcCode string) {
+	failedEvent := kafka.TransactionFailedEvent{
+		TransactionID:   payload.PartnerReferenceNo,
+		SenderAccount:   "SYSTEM_TOPUP",
+		ReceiverAccount: payload.SourceAccountNo,
+		Amount:          0, // or actual amount
+		Reason:          reason,
+		FailedAt:        time.Now(),
+	}
+	producer.Publish(ctx, kafka.TopicTransactionFailed, payload.PartnerReferenceNo, failedEvent)
 }

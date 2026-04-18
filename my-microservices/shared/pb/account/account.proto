@@ -7,6 +7,9 @@ option go_package = "my-microservices/shared/pb/account";
 service AccountGRPCService {
   // RPC baru untuk mengeksekusi mutasi transfer sekaligus validasi
   rpc ExecuteTransferMutation (TransferMutationRequest) returns (TransferMutationResponse);
+  
+  // RPC baru untuk penambahan saldo
+  rpc ExecuteTopupMutation (TopupMutationRequest) returns (TopupMutationResponse);
 }
 
 message TransferMutationRequest {
@@ -19,4 +22,15 @@ message TransferMutationResponse {
   bool success = 1;
   string error_code = 2;    // Kosong jika sukses, misal: "ERR_INSUFFICIENT_FUNDS" jika gagal
   string error_message = 3; 
+}
+
+message TopupMutationRequest {
+  string account_no = 1;
+  int64 amount = 2;
+}
+
+message TopupMutationResponse {
+  bool success = 1;
+  string error_code = 2;
+  string error_message = 3;
 }

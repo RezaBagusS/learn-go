@@ -60,3 +60,18 @@ type Transaction struct {
 
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
+
+type TopupRequest struct {
+	PartnerReferenceNo string         `json:"partner_reference_no"`
+	Amount             Amount         `json:"amount"`
+	SourceAccountNo    string         `json:"source_account_no"`
+	ExternalID         string         `json:"external_id"`
+	AdditionalInfo     AdditionalInfo `json:"additional_info"`
+}
+
+type TopupResponse struct {
+	ReferenceNo        string `json:"reference_no"`
+	PartnerReferenceNo string `json:"partner_reference_no"`
+	Amount             Amount `json:"amount"`
+	SourceAccountNo    string `json:"source_account_no"`
+}
