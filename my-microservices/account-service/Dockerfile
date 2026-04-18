@@ -4,26 +4,19 @@
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /workspace
-
-# 1. Copy mods (Workspace tetap di-copy tapi kita akan matikan GOWORK nanti)
 COPY shared/go.mod shared/go.sum ./shared/
-COPY bank-service/go.mod bank-service/go.sum ./bank-service/
+COPY account-service/go.mod account-service/go.sum ./account-service/
 
-# 2. Pindah ke folder service agar bisa download module
-WORKDIR /workspace/bank-service
+# Pindah ke service folder
+WORKDIR /workspace/account-service
 RUN go mod edit -replace my-microservices/shared=../shared
-
-# 3. Download dependency (Cache Mount)
-# Kita tambahkan GOWORK=off agar Go hanya fokus pada go.mod di folder ini
 RUN --mount=type=cache,target=/go/pkg/mod GOWORK=off go mod download
 
-# 4. Copy source code
 WORKDIR /workspace
 COPY shared/ ./shared/
-COPY bank-service/ ./bank-service/
+COPY account-service/ ./account-service/
 
-# 5. Build binary
-WORKDIR /workspace/bank-service
+WORKDIR /workspace/account-service
 RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOWORK=off \
     go build -o /app-binary ./cmd/api/main.go
@@ -34,8 +27,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM alpine:latest
 WORKDIR /app
 COPY --from=builder /app-binary .
-COPY bank-service/.env .
-COPY bank-service/migrations ./migrations
+COPY account-service/.env .
+COPY account-service/migrations ./migrations
 EXPOSE 8080
 EXPOSE 50051
 CMD ["./app-binary"]

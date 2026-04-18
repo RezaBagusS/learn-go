@@ -5,12 +5,10 @@ import (
 	"os"
 
 	"github.com/jmoiron/sqlx"
-
 	_ "github.com/lib/pq"
 )
 
 func ConnectDB() (*sqlx.DB, error) {
-	// DSN (Data Source Name)
 	host := os.Getenv("DB_HOST")
 	port := os.Getenv("DB_PORT")
 	user := os.Getenv("DB_USER")
@@ -26,13 +24,11 @@ func ConnectDB() (*sqlx.DB, error) {
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s",
 		user, pass, host, port, name, ssl, schema)
 
-	// Buka koneksi ke database
 	db, err := sqlx.Connect("postgres", dsn)
 	if err != nil {
-		// Gunakan Error Wrapping untuk memberi konteks
-		return nil, fmt.Errorf("gagal terhubung ke database: %w", err)
+		return nil, fmt.Errorf("gagal terhubung ke database transaction-service: %w", err)
 	}
 
-	fmt.Printf("Database PostgreSQL berhasil terkoneksi ke schema '%s' dari package config!\n", schema)
+	fmt.Printf("Database PostgreSQL berhasil terkoneksi ke schema '%s' (transaction-service)\n", schema)
 	return db, nil
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	// Driver postgreSQL wajib di-import di file tempat sqlx.Connect dipanggil
 	_ "github.com/lib/pq"
 )
 

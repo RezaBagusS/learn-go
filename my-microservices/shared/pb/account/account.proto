@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package account;
+
+option go_package = "my-microservices/shared/pb/account";
+
+service AccountGRPCService {
+  // RPC baru untuk mengeksekusi mutasi transfer sekaligus validasi
+  rpc ExecuteTransferMutation (TransferMutationRequest) returns (TransferMutationResponse);
+}
+
+message TransferMutationRequest {
+  string source_account = 1;
+  string beneficiary_account = 2;
+  int64 amount = 3;
+}
+
+message TransferMutationResponse {
+  bool success = 1;
+  string error_code = 2;    // Kosong jika sukses, misal: "ERR_INSUFFICIENT_FUNDS" jika gagal
+  string error_message = 3; 
+}

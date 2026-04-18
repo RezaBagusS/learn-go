@@ -1,0 +1,386 @@
+
+services:
+  # ==========================================
+  # INFRASTRUKTUR
+  # ==========================================
+
+  ## PostgreSQL (Satu DB, Banyak Schema)
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M   # Batasi RAM PostgreSQL
+        reservations:
+          memory: 128M
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    restart: always
+    ports:
+      - "${REDIS_PORT}:6379"
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru --save ""
+    # --save "" → matikan persistence agar lebih ringan (cukup untuk dev)
+    networks:
+      - microservices-network
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+        reservations:
+          memory: 32M
+
+  # Kafka - confluentinc dengan resource limit ketat untuk laptop
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      # --- KRaft mode ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      # --- Listeners ---
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # --- Topic defaults (dikurangi untuk dev) ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1          # dikurangi dari 3 → hemat RAM
+
+      # --- Hemat disk & RAM untuk dev ---
+      KAFKA_LOG_RETENTION_HOURS: 1
+      KAFKA_LOG_SEGMENT_BYTES: 104857600   # 100 MB (dari 1 GB)
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+
+      # --- JVM heap dikurangi drastis (kunci utama hemat RAM) ---
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
+
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M   # hard cap agar tidak makan RAM sembarangan
+        reservations:
+          memory: 256M
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-kraft
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 # pakai listener INTERNAL
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: prometheus
+  #   volumes:
+  #     - ./etc/prometheus:/etc/prometheus
+  #   command:
+  #     - "--config.file=/etc/prometheus/prometheus.yml"
+  #   ports:
+  #     - "9090:9090"
+  #   networks:
+  #     - microservices-network
+
+  # tempo:
+  #   image: grafana/tempo:2.3.0
+  #   container_name: tempo
+  #   command: ["-config.file=/etc/tempo/tempo.yaml"]
+  #   volumes:
+  #     - ./etc/tempo:/etc/tempo
+  #   ports:
+  #     - "3200:3200"
+  #     - "4317:4317"
+  #     - "4318:4318"
+  #   networks:
+  #     - microservices-network
+
+  # loki:
+  #   image: grafana/loki:latest
+  #   container_name: loki
+  #   command: ["-config.file=/etc/loki/local-config.yaml"]
+  #   volumes:
+  #     - ./etc/loki:/etc/loki    
+  #   ports:
+  #     - "3100:3100"
+  #   networks:
+  #     - microservices-network
+
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: grafana
+  #   environment:
+  #     - GF_AUTH_ANONYMOUS_ENABLED=true
+  #     - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+  #   ports:
+  #     - "3001:3000"
+  #   volumes:
+  #     - ./etc/grafana:/etc/grafana/provisioning
+  #     - grafana_data:/var/lib/grafana
+  #   depends_on:
+  #     prometheus:
+  #       condition: service_started
+  #     tempo:
+  #       condition: service_started
+  #     loki:
+  #       condition: service_started
+  #   networks:
+  #     - microservices-network
+
+  # ==========================================
+  # MICROSERVICES APLIKASI
+  # ==========================================
+
+  # Bank Service
+  bank-service:
+    build:
+      context: .
+      dockerfile: ./bank-service/Dockerfile
+    container_name: app-bank-service
+    environment:
+      APP_ADDR: "0.0.0.0"
+      APP_PORT: ${APP_PORT}
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: disable
+      DB_SCHEMA: bank_schema
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      MIGRATIONS_PATH: "file:///app/migrations"
+      KAFKA_BROKERS: "kafka:29092"
+      ACCOUNT_GRPC_ADDR: "account-service:50051"
+      TRANSACTION_GRPC_ADDR: "transaction-service:50051"
+    ports:
+      - "8081:8080"
+      - "50051:50051"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # Account Service
+  account-service:
+    build:
+      context: .
+      dockerfile: ./account-service/Dockerfile
+    container_name: app-account-service
+    environment:
+      APP_ADDR: "0.0.0.0"
+      APP_PORT: ${APP_PORT}
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: disable
+      DB_SCHEMA: account_schema
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      MIGRATIONS_PATH: "file:///app/migrations"
+      KAFKA_BROKERS: "kafka:29092"
+      BANK_GRPC_ADDR: "bank-service:50051"
+      TRANSACTION_GRPC_ADDR: "transaction-service:50051"
+    ports:
+      - "8082:8080"
+      - "50052:50051"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # Transaction Service
+  transaction-service:
+    build:
+      context: .
+      dockerfile: ./transaction-service/Dockerfile
+    container_name: app-transaction-service
+    environment:
+      APP_ADDR: "0.0.0.0"
+      APP_PORT: ${APP_PORT}
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: disable
+      DB_SCHEMA: transaction_schema
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      MIGRATIONS_PATH: "file:///app/migrations"
+      KAFKA_BROKERS: "kafka:29092"
+      BANK_GRPC_ADDR: "bank-service:50051"
+      ACCOUNT_GRPC_ADDR: "account-service:50051"
+      FRAUD_GRPC_ADDR: "fraud-service:50051"
+    ports:
+      - "8083:8080"
+      - "50053:50051"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      fraud-service:
+        condition: service_started
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # Notification Service (gRPC Server)
+  notification-service:
+    build:
+      context: ./notification-service
+    container_name: app-notification-service
+    environment:
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: disable
+      DB_SCHEMA: notification_schema
+      KAFKA_BROKERS: "kafka:29092"
+      KAFKA_GROUP_ID: "notification-group"
+      CALLBACK_TIMEOUT_SECONDS: 15
+      CALLBACK_MAX_RETRIES: 3
+      MIGRATIONS_PATH: "file:///root/migrations"
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # Fraud Service (gRPC Server)
+  fraud-service:
+    build:
+      context: .
+      dockerfile: ./fraud-service/Dockerfile
+    container_name: app-fraud-service
+    environment:
+      APP_PORT: 50051
+      KAFKA_BROKERS: "kafka:29092"
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - "50054:50051"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - microservices-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+# ==========================================
+# JARINGAN INTERNAL (NETWORK)
+# ==========================================
+networks:
+  microservices-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:

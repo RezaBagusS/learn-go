@@ -1,0 +1,11 @@
+.git
+.gitignore
+**/tmp
+**/bin
+**/*.exe
+docker-compose.yml
+init-db
+etc
+postgres_data
+redis_data
+kafka_data

@@ -1,0 +1,20 @@
+{
+  "name": "fraud-service",
+  "version": "1.0.0",
+  "description": "Fraud detection service for learn-go microservices (gRPC)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.10.1",
+    "@grpc/proto-loader": "^0.7.10",
+    "kafkajs": "^2.2.4",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

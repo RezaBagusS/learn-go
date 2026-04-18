@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package fraud;
+
+option go_package = "my-microservices/shared/pb/fraud";
+
+service FraudService {
+  rpc ValidateTransaction(FraudValidationRequest) returns (FraudValidationResponse);
+}
+
+message FraudValidationRequest {
+  string transaction_id = 1;
+  string sender_id = 2;
+  string receiver_id = 3;
+  double amount = 4;
+  string currency = 5;
+  string device_id = 6;
+  string channel = 7;
+}
+
+message FraudValidationResponse {
+  bool is_fraud = 1;
+  string reason = 2;
+  string action = 3; // e.g., "BLOCK", "ALLOW", "REVIEW"
+}
