@@ -21,12 +21,11 @@ const redis = new Redis({
   port: process.env.REDIS_PORT || 6379,
 });
 
-// Mock Data / Parametrized rules
 const BLACKLISTED_ACCOUNTS = ['9999999999', '1234567890'];
 const MAX_AMOUNT_LIMIT = 50000000; // 50 Juta
 
 /**
- * Handle gRPC request ValidateTransaction
+ * gRPC ValidateTransaction
  */
 async function validateTransaction(call, callback) {
   const req = call.request;
@@ -39,7 +38,7 @@ async function validateTransaction(call, callback) {
   let action = 'ALLOW';
 
   try {
-    // --- 1. Check Blacklist ---
+    // --- Check Blacklist ---
     const isSharedBlacklist = await redis.sismember('fraud:blacklist', req.receiver_id);
     if (BLACKLISTED_ACCOUNTS.includes(req.receiver_id) || isSharedBlacklist) {
       isFraud = true;
@@ -47,7 +46,7 @@ async function validateTransaction(call, callback) {
       action = 'BLOCK';
     }
 
-    // --- 2. Check Daily Cumulative Limit (50jt/Day) ---
+    // --- Daily Cumulative Trx Limit (50jt/Day) ---
     if (!isFraud) {
       const today = new Date().toISOString().split('T')[0];
       const dailyLimitKey = `fraud:daily_limit:${req.sender_id}:${today}`;
@@ -64,12 +63,12 @@ async function validateTransaction(call, callback) {
         isFraud = true;
         reason = `Daily limit exceeded: ${currentDailyTotal} / ${MAX_AMOUNT_LIMIT}`;
         action = 'BLOCK';
-        // Rollback nominal karena transaksi ini gagal/dihambat
+
         await redis.incrby(dailyLimitKey, -amount);
       }
     }
 
-    // --- 3. Velocity Check (Max 5 tx / minute) ---
+    // --- Velocity Check (Max 5 tx / 5 minute) ---
     if (!isFraud) {
       const velocityKey = `fraud:velocity:${req.sender_id}`;
       const count = await redis.incr(velocityKey);
@@ -82,7 +81,7 @@ async function validateTransaction(call, callback) {
       }
     }
 
-    // --- 4. Logic Check Jam (01:00 - 04:00) -> Review Only ---
+    // --- Check Jam (01:00 - 04:00) -> Review Only ---
     const hour = new Date().getHours();
     if (hour >= 1 && hour <= 4 && !isFraud) {
       reason = 'Suspicious hour (1AM - 4AM)';

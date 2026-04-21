@@ -19,6 +19,7 @@ import (
 	pbAccount "my-microservices/shared/pb/account"
 	pbFraud "my-microservices/shared/pb/fraud"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -463,7 +464,7 @@ func (s *transactionService) Topup(ctx context.Context, accountID string, produc
 	}
 
 	// ─── SIMPAN TRANSAKSI KE DB ────────────────────────────────────────
-	referenceNoGenerated := fmt.Sprintf("TOP%d", time.Now().Unix())
+	referenceNoGenerated := fmt.Sprintf("TOPUP-%s-%d", uuid.New().String(), time.Now().Unix())
 	trx := domain.Transaction{
 		ReferenceNo:    referenceNoGenerated,
 		FromAccountNo:  "SYSTEM_TOPUP", // Virtual sender
